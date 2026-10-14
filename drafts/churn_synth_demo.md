@@ -54,3 +54,9 @@ block（128 tokens）粒度抓取，抓取放大系数 = 128/tokens_per_block：
 合成/真实 trace → ρ 与驻留容量 → 拷贝时间收益。缺的真实输入仍是
 **真实 indexer 的逐步 top-K dump**（向用户/绿区索取，jsonl 格式即
 churn_analysis.py 的输入格式）。
+
+## 规模可行性（macOS 实测，2026-10-15）
+
+61 层 × 300 步 × k=2048（37M token 访问）：生成 6.2s + 解析分析 10.3s。
+2000 步全程约 2 分钟量级，无需裁剪。LRU 模拟为 O(1)/访问（序保持 dict），
+生成器拒绝采样 O(1)/token（摊销）。

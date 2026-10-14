@@ -45,10 +45,12 @@ def _gen_chain(steps: int, k: int, vocab: int, keep: float, hot_pool: int,
             current = []
         base = region * hot_pool
         survivors = set(rng.sample(current, kept)) if current and kept else set()
-        fresh_pool = [token for token in range(base, base + hot_pool)
-                      if token not in survivors]
-        fresh = rng.sample(fresh_pool, k - len(survivors))
-        current = sorted(survivors | set(fresh))
+        fresh: set[int] = set()
+        while len(fresh) < k - len(survivors):
+            token = rng.randrange(base, base + hot_pool)  # rejection: O(1) amortized
+            if token not in survivors:
+                fresh.add(token)
+        current = sorted(survivors | fresh)
         chain.append(current)
     return chain
 

@@ -46,21 +46,26 @@ def overlap_ratios(steps: list) -> list[float]:
 
 
 def simulate_lru(steps: list, capacity: int):
-    """Token-level LRU residency. Returns (hits, misses, hit_rate)."""
+    """Token-level LRU residency. Returns (hits, misses, hit_rate).
+
+    Plain dict as an order-preserving LRU: delete+reinsert on hit moves the
+    token to the most-recent end; evicting next(iter(...)) drops the oldest.
+    O(1) per access.
+    """
     if capacity < 1:
         raise ValueError("capacity must be positive")
-    recency: dict[int, int] = {}
-    clock = hits = misses = 0
+    recency: dict[int, None] = {}
+    hits = misses = 0
     for _, indices in steps:
         for token in indices:
             if token in recency:
                 hits += 1
+                del recency[token]
             else:
                 misses += 1
                 if len(recency) >= capacity:
-                    del recency[min(recency, key=recency.get)]
-            recency[token] = clock
-            clock += 1
+                    recency.pop(next(iter(recency)))
+            recency[token] = None
     total = hits + misses
     return hits, misses, (hits / total if total else 0.0)
 
