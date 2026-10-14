@@ -21,5 +21,4 @@ OPP（叠加 side_blueprint 补丁，QUEUE_DEPTH=8）、跑自检+双方案冒�
 判读标准已在 pingpong.md §R1 写死：cpu ≥ npu（copy=300 全 cards）⇒ S1 阳性；
 cpu < npu 且 gather 主导 ⇒ S1 阴性；h2d 主导 ⇒ 方向是减 H2D 量；
 hybrid overlap < min(npu,cpu) ⇒ S2 阳性候选；G1–G3 失败 ⇒ 整轮无效。
-**交付**：待绿区回传。
-**判读**：待交付后蓝区填写。
+**交付**（commit 本轮 push 后回填）：G1–G4 全过（build OK / QUEUE_DEPTH=8 / 21 tests OK / 冒烟 2 case correctness 全 true）；G5 未过——主矩阵在 cpu×copy0 坐标崩（test_scheme_worker.py:239 访问 case.staging 为 None——copy=0 时 phys_src_all 空致 staging 未分配），60 个 case 仅完成 12 个 npu（全 passed、correctness 全 true），cpu/hybrid 未跑；manifest status=failed。数据出处：results/copy_scheme_a5_c8/（gitignore 不入库），npu cards1/copy100=32.649 GB/s 与冒烟 32.485 同轮一致。
