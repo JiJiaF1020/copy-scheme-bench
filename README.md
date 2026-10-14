@@ -34,6 +34,8 @@ copy-scheme-bench/
 ├── tools/churn_analysis.py      # 集合层：top-K trace 的 ρ/LRU 驻留/block 统计
 ├── tools/churn_synth.py         # 集合层：合成 top-K trace 生成器（ρ/热池/相变/层数）
 ├── tools/breakeven.py           # 盈亏模型：T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
+├── tools/breakeven_table.py     # 盈亏模型的 md 汇总表直读前端（交付判读用）
+├── tools/repeat_spread.py       # repeat 极差表：逐坐标 (max-min)/min，>10% 标 UNSTABLE（可回溯分析历史结果目录）
 ├── drafts/                      # 蓝区工作底稿（派单草稿、模型预览；非绿区任务面）
 └── tests/
     ├── _bootstrap.py            # 定位蓝图仓（SCATTER_ROOT），复用其六列口径
@@ -45,7 +47,7 @@ copy-scheme-bench/
     ├── test_scheme_worker.py    # 单卡 worker：npu/cpu/hybrid 三方案，迭代级分位数（torch 延迟导入）
     ├── run_scheme_multiprocess.py  # 多 die runner：两阶段文件握手，NUMA 绑定
     ├── run_scheme_sweep.py      # 矩阵 sweep：dry-run 免 NPU；--repeat N 做 run 级波动控制
-    └── test_scheme_tools.py     # macOS 自检（36 项，无 torch 依赖）
+    └── test_scheme_tools.py     # macOS 自检（41 项，无 torch 依赖）
 ```
 
 口径单一来源：六列数学、`validate_workload`、常量全部 import 自蓝图仓

@@ -339,6 +339,21 @@ class ReportTests(unittest.TestCase):
         self.assertIn("marginal=141.89ns/token", out_file.stdout)
         self.assertEqual(out_file.stdout, out_stdin.stdout)
 
+    def test_repeat_spread_flags_unstable_coordinate(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/repeat_spread.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for idx, latency in enumerate((220.0, 210.0, 215.0, 240.0, 212.0, 218.0)):
+                (root / f"r{idx}.json").write_text(json.dumps(fixture(latencies=(latency,))))
+            out = subprocess.run([sys.executable, str(tool), str(root)],
+                                 capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # bandwidth = batch*copies*656 / us; latencies 210..240us ->
+        # spread = (1/210 - 1/240) / (1/240) = 240/210 - 1 = 14.29% > 10%
+        self.assertIn("14.29%", out.stdout)
+        self.assertIn("<-- UNSTABLE", out.stdout)
+
     def test_repeats_fold_into_one_row_with_std(self):
         import statistics
         from scatter_results import effective_bandwidth
