@@ -302,6 +302,26 @@ class ReportTests(unittest.TestCase):
         self.assertIn("rho*=1.05 (cpu-delta never wins)", out.stdout)
         self.assertIn("cpu-delta always wins", out.stdout)
 
+    def test_breakeven_crossover_pairs_by_copy_count(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/breakeven.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Asymmetric copy sets (anchor runs only copy300): the crossover must
+            # pair npu copy300 with cpu copy300, not with the first cpu row.
+            (root / "npu0.json").write_text(json.dumps(fixture(scheme="npu", copies=0, latencies=(11.0,))))
+            (root / "npu300.json").write_text(json.dumps(fixture(scheme="npu", copies=300, latencies=(222.6,))))
+            (root / "cpu0.json").write_text(json.dumps(fixture(scheme="cpu", copies=0, latencies=(6.6,))))
+            (root / "cpu100.json").write_text(json.dumps(fixture(scheme="cpu", copies=100, latencies=(92.1,))))
+            (root / "cpu300.json").write_text(json.dumps(fixture(scheme="cpu", copies=300, latencies=(263.2,))))
+            out = subprocess.run([sys.executable, str(tool), str(root)],
+                                 capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # rho* = 1 - (222.6-6.6)/(263.2-6.6) = 1 - 216.0/256.6 = 0.1582
+        self.assertIn("copy300: npu_full=222.6us vs cpu(T0=6.6, span=256.6) => rho*=0.16",
+                      out.stdout)
+        self.assertNotIn("span=85.5", out.stdout)  # the mis-paired copy100 span
+
     def test_breakeven_table_md_roundtrip(self):
         import subprocess
         tool = Path(__file__).resolve().parents[1] / "tools/breakeven_table.py"

@@ -86,8 +86,11 @@ def model(rows: list[dict]) -> list[str]:
         cpu_zero = next((row for row in rows if row["scheme"] == "cpu" and int(row["cards"]) == cards
                          and int(row["batch_size"]) == batch and str(row["copy_count"]) == "0"), None)
         if npu_rows and cpu_rows and npu_zero and cpu_zero:
-            for npu_row, cpu_row in zip(sorted(npu_rows, key=lambda r: r["copy_count"]),
-                                        sorted(cpu_rows, key=lambda r: r["copy_count"])):
+            cpu_by_copy = {row["copy_count"]: row for row in cpu_rows}
+            for npu_row in sorted(npu_rows, key=lambda r: r["copy_count"]):
+                cpu_row = cpu_by_copy.get(npu_row["copy_count"])
+                if cpu_row is None:
+                    continue  # pair strictly by copy_count; zip would misalign asymmetric sets
                 t_npu = float(npu_row["avg_us_mean"])
                 t0_cpu = float(cpu_zero["avg_us_mean"])
                 span_cpu = float(cpu_row["avg_us_mean"]) - t0_cpu
