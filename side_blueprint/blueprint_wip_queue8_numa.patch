@@ -1,0 +1,69 @@
+diff --git a/csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp b/csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp
+index 52e9df9..ad1fc40 100644
+--- a/csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp
++++ b/csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp
+@@ -45,13 +45,14 @@ constexpr uint32_t BLOCK_SIZE = 128;
+ constexpr uint32_t BLOCK_SHIFT = 7;
+ constexpr uint32_t BLOCK_MASK = BLOCK_SIZE - 1;
+ // Number of 656-byte reads kept in flight on the MTE2 engine at once.  At the
+-// baseline batch (b24, ~92 valid pairs/core) a depth of 2 keeps one read issued
+-// while the previous row's write overlaps.  Raising it (4/8/16) overlaps more
+-// random DRAM reads and raises effective bandwidth for small-miss workloads at
+-// the cost of a little queue-management overhead and more UB.  Bounded by UB:
++// baseline batch (b24, ~92 valid pairs/core) a depth of 8 keeps eight random
++// DRAM reads in flight per core, absorbing host-side DRAM/interconnect latency
++// jitter that a depth of 2 converts directly into bandwidth jitter.  Raising
++// it further (16) overlaps more random DRAM reads at the cost of a little
++// queue-management overhead and more UB.  Bounded by UB:
+ // each buffer is ceil(packedRowBytes/32)*32 = 672 bytes, so
+ // QUEUE_DEPTH * 672 + 2 * QUEUE_DEPTH * 8 must fit UB.
+-constexpr uint32_t QUEUE_DEPTH = 2;
++constexpr uint32_t QUEUE_DEPTH = 8;
+ 
+ class VllmA5KvcacheScatterCopyC8Kernel {
+ public:
+diff --git a/tests/test_kvcache_scatter_copy_multiprocess.py b/tests/test_kvcache_scatter_copy_multiprocess.py
+index 8f1aa81..c6f7dbc 100644
+--- a/tests/test_kvcache_scatter_copy_multiprocess.py
++++ b/tests/test_kvcache_scatter_copy_multiprocess.py
+@@ -62,8 +62,24 @@ def stop_workers(processes: list) -> None:
+             process.wait()
+ 
+ 
++def numactl_prefix(devices: list[int]) -> list[str]:
++    """Optional per-rank NUMA binding via SCATTER_C8_NUMA_NODES="n0,n1,...".
++
++    One node id per selected device, in device order. Empty env var keeps the
++    original unbound behavior. Requires numactl on PATH.
++    """
++    value = os.environ.get("SCATTER_C8_NUMA_NODES", "").strip()
++    if not value:
++        return []
++    nodes = [item.strip() for item in value.split(",")]
++    if len(nodes) != len(devices) or any(not node.isdigit() for node in nodes):
++        raise ValueError("SCATTER_C8_NUMA_NODES must list one non-negative node id per device.")
++    return nodes
++
++
+ def run_workers(args: argparse.Namespace, devices: list[int]) -> list[dict]:
+     worker = Path(__file__).with_name("test_kvcache_scatter_copy.py")
++    numa_nodes = numactl_prefix(devices)
+     with tempfile.TemporaryDirectory(prefix="a5_scatter_c8_") as name:
+         temp = Path(name)
+         start_file, timing_start_file = temp / "start", temp / "timing_start"
+@@ -87,7 +103,14 @@ def run_workers(args: argparse.Namespace, devices: list[int]) -> list[dict]:
+                 ]
+                 if args.allow_non_a5:
+                     command.append("--allow-non-a5")
+-                print(f"A5_SCATTER_C8_MULTIPROCESS_LAUNCH rank={rank} device=npu:{device} seed={seed}", flush=True)
++                if numa_nodes:
++                    node = numa_nodes[rank]
++                    command = ["numactl", f"--cpunodebind={node}", f"--membind={node}"] + command
++                print(
++                    f"A5_SCATTER_C8_MULTIPROCESS_LAUNCH rank={rank} device=npu:{device} "
++                    f"seed={seed} numa_node={numa_nodes[rank] if numa_nodes else 'unbound'}",
++                    flush=True,
++                )
+                 processes.append((rank, subprocess.Popen(command), result_file))
+             wait_until_ready(initial_ready, processes, "initialization")
+             start_file.write_text("start\n", encoding="utf-8")
