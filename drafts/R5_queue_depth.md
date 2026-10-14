@@ -5,7 +5,10 @@
 > 取决于 R4 判读（见末节「方向分支」）；合 main 前按 R4 数据定稿，写进
 > pingpong.md 才算生效。
 >
-> 定稿待办：自检项数按当时实际更新（当前 40 项）；results 目录前缀改 r5。
+> 定稿待办：~~自检项数按当时实际更新~~（已确认 40 项，2026-10-15 03:07 本地
+> 自检通过，R5 派出时绿区 pull 的 main 含 53f124e 回归测试）；~~results 目录
+> 前缀~~（已改 r5）；~~for 循环展开~~（已平铺，见下）。剩余定稿动作：按 R4
+> 判读选方向分支。
 
 ## 目标
 
@@ -37,29 +40,37 @@
 - 每组 3×1×2×3 = 18 case，三组共 54 case-run。
 - 全部跑完后恢复 QUEUE_DEPTH=8 并重编（收尾命令写进任务书）。
 
-## 执行命令（定稿时逐字化）
+## 执行命令（定稿平铺版，逐字执行）
 
 ```bash
 cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
 cd tests && python3 test_scheme_tools.py && cd ..
 
-for D in 4 8 16; do
-  tools/build_queue_depth.sh $D            # 内部：改常量+重编+grep 校验
-  export SCATTER_C8_QUEUE_DEPTH=$D
-  bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
-    --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
-    --results-dir results/r5/qd$D
-done
+tools/build_queue_depth.sh 4
+export SCATTER_C8_QUEUE_DEPTH=4
+bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
+  --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
+  --results-dir results/r5/qd4
 
-tools/build_queue_depth.sh 8               # 恢复
+tools/build_queue_depth.sh 8
+export SCATTER_C8_QUEUE_DEPTH=8
+bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
+  --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
+  --results-dir results/r5/qd8
+
+tools/build_queue_depth.sh 16
+export SCATTER_C8_QUEUE_DEPTH=16
+bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
+  --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
+  --results-dir results/r5/qd16
+
+tools/build_queue_depth.sh 8
 unset SCATTER_C8_QUEUE_DEPTH
 ```
 
-（`for` 循环若不合「逐字执行」纪律，定稿时展开成三组平铺命令。）
-
 ## 通过标准（草稿）
 
-- R5-G1：自检 <定稿时填当前项数> 项 OK；每次 build_queue_depth.sh 后 grep
+- R5-G1：自检 40 项 OK（`Ran 40 tests`）；每次 build_queue_depth.sh 后 grep
   输出 `QUEUE_DEPTH = <D>` 与目标一致。
 - R5-G2：三个 manifest 全 passed，54 个 case correctness 全 true，
   每个 JSON 的 `queue_depth` 字段与组一致（防 tag 串组）。
