@@ -21,7 +21,7 @@ C) THP=always+pretouch（24 case，自记原值自恢复）；D) cpu w16 轮内�
 （8 case）；E) npu cards8 copy300 锚点（2 case）；共 106（蓝区 dry-run 已
 核验）。通过标准 R4-G1..G4 与判读预案（S2 阳性 / frac 最优点 / 缺页实锤 /
 TLB 实锤 / gather 纯带宽 bound / breakeven 回填）见 pingpong.md §R4。
-**交付**：待绿区回传。
+**交付**（commit 本轮 push 后回填）：纯测量轮 106 case 全过（A frac 48 / B pretouch 24 / C THP+pretouch 24 / D base 8 / E npu anchor 2，RC 全 0）。G1-G4 全过：自检 39 OK；106 case passed+correctness 全 true+window==16+pretouch 分组对；THP 设置/恢复原值 madvise 一致；D vs R3w16 最大偏差 9.58%。关键事实：A 组 cards8 copy300 最优 cf0.1/0.4（178.4/178.9 GB/s）超 E 组 npu anchor 171.3；B pretouch cards8 copy300 cpu_gather 136.2 vs D base 253.3（-46%），cards1 持平；C THP+pretouch 未再降（cards8 179.4，反升）。breakeven 回填 rho*=0.25/0.20（cards1/8 copy300，远左移于 R3 预测 0.37）。结果 results/r4/{frac,pretouch,pretouch_thp,base,anchor}/。
 **判读**：待交付后蓝区填写。
 
 ## §R3 窗口化流水压 host 开销 + 复试（2026-10-15）
