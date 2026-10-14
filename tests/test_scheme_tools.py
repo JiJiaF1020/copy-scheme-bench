@@ -23,6 +23,7 @@ _bootstrap.ensure_importable()
 from scatter_config import BYTES_PER_TOKEN, COPY_CAP_DEFAULT  # noqa: E402
 
 import run_scheme_sweep  # noqa: E402
+import scheme_churn  # noqa: E402
 import scheme_report  # noqa: E402
 import scheme_workload as wl  # noqa: E402
 import test_scheme_worker  # noqa: E402
@@ -141,6 +142,42 @@ class HybridSplitTests(unittest.TestCase):
             wl.split_hybrid([2], [[1]], [[1, 2]], 0.5)
 
 
+class ChurnTests(unittest.TestCase):
+    def test_constant_set_full_overlap(self):
+        lines = [json.dumps(list(range(100))) for _ in range(10)]
+        report = scheme_churn.analyze_trace(lines, 128, (1.0, 2.0))
+        stats = report["None"]
+        self.assertEqual(stats["adjacent_overlap"]["mean"], 1.0)
+        # LRU cold start: the first step misses, the remaining 9 hit.
+        self.assertAlmostEqual(stats["residency"]["1x"]["hit_rate"], 0.9)
+
+    def test_cyclic_lru_sharp_threshold(self):
+        # Four disjoint sets cycled forever: 3x capacity never hits, 4x always hits
+        # after the first cycle (cold-start misses = 4/40 of all accesses).
+        sets = [list(range(i * 50, (i + 1) * 50)) for i in range(4)]
+        lines = [json.dumps(sets[i % 4]) for i in range(40)]
+        report = scheme_churn.analyze_trace(lines, 128, (3.0, 4.0))
+        self.assertEqual(report["None"]["residency"]["3x"]["hit_rate"], 0.0)
+        self.assertAlmostEqual(report["None"]["residency"]["4x"]["hit_rate"], 0.9)
+        self.assertEqual(report["None"]["adjacent_overlap"]["mean"], 0.0)
+
+    def test_partial_overlap_and_blocks(self):
+        lines = [json.dumps({"step": 0, "layer": 3, "indices": [0, 1, 128, 200]}),
+                 json.dumps({"step": 1, "layer": 3, "indices": [0, 1, 300, 400]})]
+        report = scheme_churn.analyze_trace(lines, 128, (1.0,))
+        stats = report["3"]
+        self.assertEqual(stats["adjacent_overlap"]["mean"], 0.5)
+        self.assertEqual(stats["blocks"]["mean_blocks_per_step"], 2.5)
+
+    def test_bad_input_rejected(self):
+        with self.assertRaises(ValueError):
+            scheme_churn.analyze_trace([], 128, (1.0,))
+        with self.assertRaises(ValueError):
+            scheme_churn.analyze_trace(['{"no_indices": 1}'], 128, (1.0,))
+        with self.assertRaises(ValueError):
+            scheme_churn.analyze_trace(['[1,2]'], 0, (1.0,))
+
+
 class ReportTests(unittest.TestCase):
     def test_bandwidth_math_matches_blueprint(self):
         row = scheme_report.normalize_scheme_case(fixture())
@@ -170,11 +207,53 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent scheme"):
             scheme_report.normalize_scheme_case(case)
 
-    def test_duplicates_rejected(self):
-        with self.assertRaisesRegex(ValueError, "Duplicate"):
-            scheme_report.build_rows([fixture(), fixture()])
-        rows = scheme_report.build_rows([fixture(scheme="npu"), fixture(scheme="cpu")])
-        self.assertEqual([row["scheme"] for row in rows], ["cpu", "npu"])
+    def test_breakeven_model_math(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/breakeven.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "npu0.json").write_text(json.dumps(fixture(scheme="npu", copies=0, latencies=(11.0,))))
+            (root / "npu300.json").write_text(json.dumps(fixture(scheme="npu", copies=300, latencies=(138.7,))))
+            (root / "cpu0.json").write_text(json.dumps(fixture(scheme="cpu", copies=0, latencies=(20.0,))))
+            (root / "cpu300.json").write_text(json.dumps(fixture(scheme="cpu", copies=300, latencies=(500.0,))))
+            out = subprocess.run([sys.executable, str(tool), str(root)],
+                                 capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # npu: T0=11, T_full=138.7, tokens=900 -> marginal=(138.7-11)/900=0.1419us=141.89ns
+        self.assertIn("marginal=141.89ns/token", out.stdout)
+        # rho=0.9 -> T_delta = 11 + 0.1*127.7 = 23.77 -> speedup 5.84x
+        self.assertIn("rho=0.9  T_delta=    23.8us  speedup_vs_full= 5.84x", out.stdout)
+        # crossover: rho* = 1 - (138.7-20)/(500-20) = 1 - 0.2473 = 0.7527
+        self.assertIn("rho*=0.75 (cpu-delta wins for rho > 0.75)", out.stdout)
+
+    def test_breakeven_skips_nonpassed_and_missing_endpoints(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/breakeven.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            failed = fixture(scheme="npu", copies=0)
+            failed["status"] = "failed"
+            (root / "failed.json").write_text(json.dumps(failed))
+            out = subprocess.run([sys.executable, str(tool), str(root)],
+                                 capture_output=True, text=True)
+        self.assertIn("no passed case JSONs", out.stdout + out.stderr)
+
+    def test_repeats_fold_into_one_row_with_std(self):
+        import statistics
+        from scatter_results import effective_bandwidth
+        run1 = fixture(scheme="cpu", latencies=(10.0, 30.0))
+        run2 = fixture(scheme="cpu", latencies=(20.0, 20.0))
+        rows = scheme_report.build_rows([run1, run2])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["n_runs"], 2)
+        tokens = 21  # batch 3 * copies 7, per die
+        b1 = effective_bandwidth(tokens * BYTES_PER_TOKEN, 10.0) + effective_bandwidth(tokens * BYTES_PER_TOKEN, 30.0)
+        b2 = 2 * effective_bandwidth(tokens * BYTES_PER_TOKEN, 20.0)
+        self.assertAlmostEqual(row["avg_bandwidth"], statistics.fmean([b1, b2]))
+        self.assertAlmostEqual(row["avg_bandwidth_std"], statistics.stdev([b1, b2]))
+        distinct = scheme_report.build_rows([fixture(scheme="npu"), fixture(scheme="cpu")])
+        self.assertEqual([row["scheme"] for row in distinct], ["cpu", "npu"])
 
     def test_analyze_writes_csv_md_json(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -222,6 +301,15 @@ class SweepCliTests(unittest.TestCase):
             with self.subTest(extra=extra), patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1"}, clear=True):
                 with self.assertRaises(ValueError):
                     run_scheme_sweep.parse_args(base + extra)
+
+    def test_repeat_expands_cases(self):
+        with patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1"}, clear=True):
+            args = run_scheme_sweep.parse_args(
+                ["--cards", "1", "--batch-size", "3", "--copy-count", "7",
+                 "--schemes", "npu", "--repeat", "3"])
+            planned = list(run_scheme_sweep.cases(args))
+        self.assertEqual(len(planned), 3)
+        self.assertEqual([name.rsplit("_r", 1)[1] for name, _, _, _ in planned], ["1", "2", "3"])
 
     def test_dry_run_prints_without_touching_results_dir(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -307,6 +395,12 @@ class RunnerCliTests(unittest.TestCase):
 
 
 class WorkerCliTests(unittest.TestCase):
+    def test_quantiles_helper(self):
+        q = test_scheme_worker._quantiles([float(i) for i in range(1, 101)])
+        self.assertEqual((q["min"], q["max"], q["n"]), (1.0, 100.0, 100))
+        self.assertAlmostEqual(q["mean"], 50.5)
+        self.assertEqual((q["p50"], q["p90"], q["p99"]), (51.0, 91.0, 100.0))
+
     def test_parse_and_validate_without_torch(self):
         args = test_scheme_worker.parse_args(["--scheme", "cpu", "--cpu-threads", "16",
                                               "--run-frac", "0.5", "--copy-count", "200"])

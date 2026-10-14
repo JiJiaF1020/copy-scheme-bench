@@ -61,7 +61,8 @@ def parse_args(argv=None):
     parser.add_argument("--hybrid-modes", nargs="+", help=f"Subset of {HYBRID_MODES}; environment: HYBRID_MODES.")
     for flag, env, default in (("source-len", "SOURCE_LEN", 65536), ("hbm-slots", "HBM_SLOTS", 8192),
                                ("copy-cap", "COPY_CAP", COPY_CAP_DEFAULT), ("warmup", "WARMUP", 10),
-                               ("iters", "ITERS", 1000), ("seed", "SEED", 7), ("cpu-threads", "CPU_THREADS", 8)):
+                               ("iters", "ITERS", 1000), ("seed", "SEED", 7), ("cpu-threads", "CPU_THREADS", 8),
+                               ("repeat", "REPEAT", 1)):
         parser.add_argument(f"--{flag}", type=int, default=os.getenv(env, str(default)))
     parser.add_argument("--numa-nodes", default=os.getenv("NUMA_NODES", ""),
                         help='Space/comma-separated node ids, e.g. "0 1 2 3"; when set, every case runs twice (unbound and bound).')
@@ -90,6 +91,8 @@ def parse_args(argv=None):
         raise ValueError(f"hybrid modes must be entries of {HYBRID_MODES}.")
     if any(frac > 1.0 for frac in args.run_fracs + args.cpu_fracs):
         raise ValueError("run-fracs and cpu-fracs must not exceed 1.0.")
+    if args.repeat < 1:
+        raise ValueError("--repeat must be positive.")
     if max(args.cards) > len(visible):
         raise ValueError(f"Requested {max(args.cards)} dies, but only {len(visible)} devices are visible.")
     args.numa_nodes = [int(part) for part in args.numa_nodes.replace(",", " ").split()]
@@ -126,25 +129,29 @@ def cases(args):
                     for cards in args.cards:
                         for batch in args.batch_size:
                             for copies in args.copy_count:
-                                name = case_name(scheme, cards, batch, copies, run_frac, cpu_frac, hybrid_mode, numa)
-                                output = args.results_dir / f"{name}.json"
-                                command = [sys.executable, str(ROOT / "tests/run_scheme_multiprocess.py"),
-                                           "--cards", str(cards), "--batch-size", str(batch),
-                                           "--copy-count", str(copies),
-                                           "--source-len", str(args.source_len), "--hbm-slots", str(args.hbm_slots),
-                                           "--copy-cap", str(args.copy_cap), "--warmup", str(args.warmup),
-                                           "--iters", str(args.iters), "--seed", str(args.seed), "--same-seed",
-                                           "--scheme", scheme, "--run-frac", str(run_frac),
-                                           "--cpu-threads", str(args.cpu_threads),
-                                           "--output", str(output)]
-                                if scheme == "hybrid":
-                                    command += ["--cpu-frac", str(cpu_frac), "--hybrid-mode", hybrid_mode]
-                                if args.pretouch:
-                                    command.append("--pretouch")
-                                env_extra = {}
-                                if numa:
-                                    env_extra[NUMA_ENV] = ",".join(str(node) for node in args.numa_nodes[:cards])
-                                yield name, output, command, env_extra
+                                for repeat_idx in range(args.repeat):
+                                    name = case_name(scheme, cards, batch, copies, run_frac,
+                                                     cpu_frac, hybrid_mode, numa)
+                                    if args.repeat > 1:
+                                        name += f"_r{repeat_idx + 1}"
+                                    output = args.results_dir / f"{name}.json"
+                                    command = [sys.executable, str(ROOT / "tests/run_scheme_multiprocess.py"),
+                                               "--cards", str(cards), "--batch-size", str(batch),
+                                               "--copy-count", str(copies),
+                                               "--source-len", str(args.source_len), "--hbm-slots", str(args.hbm_slots),
+                                               "--copy-cap", str(args.copy_cap), "--warmup", str(args.warmup),
+                                               "--iters", str(args.iters), "--seed", str(args.seed), "--same-seed",
+                                               "--scheme", scheme, "--run-frac", str(run_frac),
+                                               "--cpu-threads", str(args.cpu_threads),
+                                               "--output", str(output)]
+                                    if scheme == "hybrid":
+                                        command += ["--cpu-frac", str(cpu_frac), "--hybrid-mode", hybrid_mode]
+                                    if args.pretouch:
+                                        command.append("--pretouch")
+                                    env_extra = {}
+                                    if numa:
+                                        env_extra[NUMA_ENV] = ",".join(str(node) for node in args.numa_nodes[:cards])
+                                    yield name, output, command, env_extra
 
 
 def write_json(path: Path, value: dict) -> None:
