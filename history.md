@@ -12,6 +12,19 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R3 窗口化流水压 host 开销 + 复试（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+蓝区按 R2 写死分支实现 worker `--window N`（每窗口 N 迭代共享一次同步，
+每迭代独占 staging slot；window=1 逐字等价 R2 语义）+ sweep/runner 转发
+（macOS 自检 38 项通过）；绿区免重编，pull 后跑 A) w1 轮内基线 48 case、
+B) w16 吞吐模式 48 case、C) npu 锚点 12 case（cpu/hybrid×cards1248×
+copy{0,100,300}×repeat2，npu×cards148×copy{0,300}×repeat2，共 108）。
+通过标准 R3-G1..G3 与判读预案（host 压减有效性 / S1 翻正 / S2 重开 /
+cpu 判死转集合层）见 pingpong.md §R3。
+**交付**：待绿区回传。
+**判读**：待交付后蓝区填写。
+
 ## §R1 A5 首轮主矩阵：npu vs cpu vs hybrid（2026-10-14）
 
 **派单**（commit = 本仓 init commit，hash 以 `git log --oneline -1` 为准）：

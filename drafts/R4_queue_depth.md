@@ -68,13 +68,13 @@ unset SCATTER_C8_QUEUE_DEPTH
 - 单 die（cards1）也随 D 显著变化 ⇒ kernel 行为被常量改变，结论降级为
   「kernel 内部行为变化」，不与并发深度挂钩。
 
-## 方向分支（R4 派什么，由 R2/R3 数据决定，优先级从高到低）
+## 方向分支（R4 派什么，由 R3 判读决定，优先级从高到低）
 
-1. **R3 显示 THP/pretouch 无效且 npu 亚线性未解释** ⇒ 本稿（队列深度）。
-2. **R2 显示 S1 阴性（host 开销主导）且 R3 不能修复** ⇒ R4 改派
-   「host 开销压减复试」：合并 launch、减少同步点后的 cpu 复试
-   （需蓝区先改 worker，工作量一轮）。
-3. **R2 显示 cpu gather 相位仍是纯 gather 瓶颈** ⇒ R4 改派 churn 轴负载：
-   绿区用合成 trace 跑驻留+增量模拟——生成器已就绪
-   （`tools/churn_synth.py`，参数化 ρ/热池/相变周期/层数，演示见
-   `drafts/churn_synth_demo.md`），不依赖真实 indexer dump。
+1. **R3 host 压减无效（w16 未归类仍 >30%）** ⇒ cpu 路径判死，R4 转集合层：
+   churn 轴负载（`tools/churn_synth.py` 已就绪，演示见
+   `drafts/churn_synth_demo.md`）+ 盈亏模型定 ρ*。
+2. **R3 host 压减有效但仍 < npu** ⇒ R4 = 本稿（队列深度 4/8/16，查 npu 侧
+   还能挖多少）或 pretouch×THP（`drafts/R3_pretouch_thp.md`，查 gather
+   相位的 TLB/缺页成分）。
+3. **R3 S1 翻正（w16 cpu ≥ npu at cards4/8）** ⇒ R4 = 生产形态评估：
+   窗口化流水如何嵌入 vLLM 层间流水（蓝区先出设计稿，非纯 bench）。

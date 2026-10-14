@@ -35,7 +35,75 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R2 派单：修复后重跑主矩阵（2026-10-15，蓝区）
+## §R3 派单：窗口化流水压 host 开销 + cpu/hybrid 同坐标复试（2026-10-15，蓝区）
+
+### 目标
+
+R2 判读 S1 阴性（host 开销主导：cpu 未归类 host 开销 34.9%>30%，copy0 纯固定
+开销 56.9~119.8µs 随 die 数上涨）。本轮验证写死分支的下一步：worker 新增
+`--window N`（每窗口 N 次迭代共享一次同步，每迭代独占 staging slot），
+**window=16（吞吐模式）vs window=1（R2 语义，轮内基线）**同轮对比。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题为
+   "R3: §R3 派单（host 压减复试 window 1 vs 16）+ drafts 状态更新"。
+2. 蓝图仓不变：`git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `QUEUE_DEPTH = 8`；**不需要重编**。
+3. 环境变量无残留（同 §R1 前置核验第 5 条）。
+
+### 执行命令
+
+逐字执行（工作目录 /home/h2d_test/copy-scheme-bench）：
+
+```bash
+git pull --ff-only && git log --oneline -1
+cd tests && python3 test_scheme_tools.py && cd ..
+# A: window=1 轮内基线（与 R2 同语义，48 case）
+bash run_scheme_sweep.sh --schemes cpu hybrid --cpu-fracs 0.5 --hybrid-modes overlap \
+  --cards 1 2 4 8 --batch-size 24 --copy-count 0 100 300 --repeat 2 \
+  --results-dir results/r3/w1
+# B: window=16 吞吐模式（48 case）
+bash run_scheme_sweep.sh --schemes cpu hybrid --cpu-fracs 0.5 --hybrid-modes overlap \
+  --cards 1 2 4 8 --batch-size 24 --copy-count 0 100 300 --repeat 2 --window 16 \
+  --results-dir results/r3/w16
+# C: npu 锚点（12 case；window 对 npu 无影响，只作轮内对照）
+bash run_scheme_sweep.sh --schemes npu --cards 1 4 8 --batch-size 24 \
+  --copy-count 0 300 --repeat 2 --results-dir results/r3/anchor
+```
+
+### 通过标准
+
+- R3-G1：自检末两行 `Ran 38 tests` / `OK`。
+- R3-G2：三个 manifest 全 `status=="passed"`；108 个 case JSON 全 passed、
+  correctness 全 true；`w16` 目录 case JSON 的 `config.window==16`，
+  `w1` 目录 `==1`（防窗口串组）。
+- R3-G3（跨轮一致性，非门槛）：w1 的 cpu/hybrid 坐标与 §R2 交付 summary 同
+  坐标偏差 ≤15%；超出原样回传注明。
+
+### 回传格式
+
+同 §R2：交付模板 + 三个目录的 `copy_scheme_timing_summary.md` 全文 +
+manifest 全文 + 4 个 JSON 全文（cpu cards1 copy100 的 w1/w16 各一、hybrid
+cards1 copy100 的 w1/w16 各一，看 phases 用）。
+
+### 判读预案（派单时写死）
+
+- 比较口径：同轮同坐标，avg_us_mean 用 repeat 折叠值；引用分位数时用 p50；
+  `p99/p50 > 2` 的坐标标注「波动大，证据弱」。
+- 若 w16 cpu 的未归类 host 开销（= avg_us − cpu_gather_us − device_wall_us）
+  占 avg_us 从 w1 的 ~35% 降到 <10% ⇒ **host 压减有效**。
+- 若 w16 cpu 在 copy300 的 cards4/cards8 坐标 ≥ 同轮 npu 锚点带宽 ⇒
+  **S1 翻正（窗口化形态）**，下一轮做生产形态评估（流水线化集成）。
+- 若 w16 未归类占比仍 >30% ⇒ host 开销不是同步主导（是 Python/torch 调用
+  本身），cpu 路径判死，资源转集合层方向（churn 工具链已就绪）。
+- 若 w16 hybrid < 同坐标 min(npu, w16 cpu) ⇒ S2 重开候选，下轮扫细 frac。
+- 任何 case correctness 失败 ⇒ 该 case 无效；窗口化破坏正确性（如
+  assert_copied 失败集中出现在 w16）⇒ 窗口实现有竞态，蓝区修复后重派。
+
+---
+
+## §R2-旧 派单：修复后重跑主矩阵（2026-10-15，蓝区）
 
 ### 目标
 

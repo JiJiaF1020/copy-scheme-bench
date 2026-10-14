@@ -1,11 +1,14 @@
 # §R3 派单草稿：pretouch × THP 二因素实验（host 内存路径调优）
 
-> 状态：**草稿，未派**。合 main 前按 R2 实测数据定稿坐标（`[定稿]` 处），
-> 写进 pingpong.md 才算生效；本文件只作蓝区工作底稿。
+> 状态：**降级为候选（R4+），未派**。R2 判读（2026-10-15）显示 host 开销在
+> copy0 零负载下就有 56.9~119.8µs（83.1% 占比）且随 die 数上涨——是每迭代
+> launch/sync 串行成本，缺页/TLB 不解释该固定项；写死分支先走「窗口化流水
+> 压 host 开销」（即正式 §R3）。本实验保留为后续候选：若窗口化后 gather
+> 相位（cpu_gather_us）仍大，再验证 TLB/缺页成分。
 >
-> 依赖：worker/sweep/runner 的 `--pretouch` 已全链路就绪（wip-r3-prep
-> commit 9e34ff8）；`--repeat N` 提供 run 级波动控制；worker 输出迭代级
-> 分位数（p50/p90/p99），三者都在本轮自检覆盖（30 项绿）。
+> 依赖：worker/sweep/runner 的 `--pretouch` 已全链路就绪（已合 main）；
+> `--repeat N` 提供 run 级波动控制；worker 输出迭代级
+> 分位数（p50/p90/p99），三者都在本轮自检覆盖。
 
 ## 目标
 
