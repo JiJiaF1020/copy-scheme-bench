@@ -23,8 +23,24 @@
 锚）；D) npu anchor cards4 copy300×repeat4（4 case）；共 42（蓝区 dry-run
 已核验）。通过标准 R5-G1..G4 与判读预案（强阳性/弱阳性维持/翻回阴性
 三分支）见 pingpong.md §R5。
-**交付**（commit 本轮 push 后回填）：
-**判读**：待交付后蓝区填写。
+**交付**（commit 83d5507）：R5-G1 自检 40 tests OK；R5-G2 四 manifest 全
+passed、42 case 全 passed、correctness 全 true、hybrid window==16/overlap/
+cpu_frac 一致；R5-G3 分位数齐（npu 的在 latency_us_synced，结构性差异已核）；
+R5-G4 anchor8 折叠 171.343 vs §R4 E 171.264（+0.05%）。关键实测：confirm8
+cf0.1/0.15/0.3/0.4 = 167.849/161.415/164.463/178.175 GB/s，最优 cf0.4 vs
+anchor8 = +3.99%；confirm8 各 cf repeat 极差 43~63% 全「不稳」；anchor8 极差
+3.96%（稳）、anchor4 17.97%；p99/p50 全 <2；confirm4 54.823/53.807 << anchor4
+63.300。数据出处 results/r5/（gitignore）。注：绿区在文件底部另追加了一份
+§R5 条目（append-only 纪律，保留），内容与本节交付一致。
+**判读**（蓝区，2026-10-15）：**弱阳性维持**——最优 cf0.4 178.175 <
+anchor8×1.05=179.91 且极差 58.8%，强阳性双条件均不满足；178.175 > 171.343
+未翻回阴性。延迟口径打平（222.17 vs 221.83µs，+0.15%），带宽 +3.99% 全部来自
+per-die 偏斜——**S2 生产价值存疑冻结**。cf* 不可分辨（档间摆动 <10% 但 repeat
+极差 43~63%），生产稿按 cf=0.1 写死。cards4 同轮实锤不过锚（0.87x）。噪声机制
+收窄：anchor8 稳（3.96%）vs hybrid 不稳（43~63%）+ R4 die 双峰（1.74x）三方
+互洽 ⇒ CPU gather 段 NUMA 落点抽签（推测）；若归置稳定到分布上沿收益 +26%
+而非 +4%。下一步 R6：NUMA 主菜（拓扑取证 + cpu/hybrid 绑定扫描）+ anchor
+哨兵；队列深度顺延 R7 候选。逐条裁决见 pingpong.md §R5 判读节。
 
 ## §R4 hybrid 细 frac 扫描 + pretouch/THP 查 gather 成分（2026-10-15）
 

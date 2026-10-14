@@ -2807,6 +2807,63 @@ anchor4 npu: r1 55.902/320.3/332.2/368.3/1.11  r2 65.949/224.2/221.6/314.9/1.42 
 - 带宽口径复核：harness `effective_bandwidth = payload_bytes / (avg_us * 1000.0)`，`payload_bytes = copied_tokens × 656`（copied_tokens = copy_count × batch_size，cards8 copy300 即 7200 token/die），多 die 带宽=各 die 速率之和；与 §R4 交付口径一致。
 - 结果文件在 results/r5/（.gitignore，不入库）；日志 /home/h2d_test/copy-scheme-bench/run_r5.log。
 
+### 判读（§R5，2026-10-15，蓝区）
+
+对照 §R5「判读预案」（派单时写死）逐条裁决（除注明外均为绿区**实测值**）：
+
+**门槛**：R5-G1 ✓（40 项 OK，与 920c579 一致）/ R5-G2 ✓（42 case 全
+passed、correctness 全 true、window/frac/mode 核验无串组）/ R5-G3 ✓
+（分位数均在；npu 方案 p50/p99 在 `latency_us_synced` 属 Event 计时
+路径的既有结构差异，绿区逐 case 已核）/ R5-G4 ✓（anchor8 跨轮偏差
+0.05%）。
+
+**裁决 1：S2 弱阳性维持（三分支写死判据的居中分支）**
+
+- 强阳性判据「最优 cf ≥ anchor8×1.05 且 repeat 极差 ≤5%」：最优 cf0.4
+  = 178.175 < 179.91（=171.343×1.05）且极差 58.83% ⇒ 双条件均不满足。
+- 翻回阴性判据「最优 cf < anchor8」：178.175 > 171.343 ⇒ 不成立。
+- ⇒ **弱阳性维持**：带宽口径 +3.99%，收益存疑。生产形态设计稿
+  （drafts/production_form_hybrid.md）维持「收益存疑，未确认」标注。
+- **延迟口径补充（判读参考，非写死判据）**：cf0.4 avg_us_mean 222.171
+  vs anchor 221.831µs —— **打平**（+0.15%）。带宽 +3.99% 全部来自
+  per-die 偏斜（快 die 拉高速率总和）。生产 decode 看延迟，hybrid 在
+  延迟口径下**无收益**。
+
+**裁决 2：cf* 不可分辨，生产稿按 cf=0.1 写死**
+
+- 曲线相邻档摆动 -3.84/+1.89/+8.34%（字面未触发「>10%」），但各 cf 的
+  repeat 极差 43.05~63.24% 远超档间差异——按预案意图（噪声主导 ⇒
+  cf* 不可分辨）裁决：**cf* 不可分辨**，生产形态稿固定 cf=0.1（R4
+  延迟口径全档最稳：max/mean 仅 1.04）。
+
+**裁决 3：cards4 同轮实锤不过锚**
+
+- confirm4 最优 cf0.1 = 54.823 << anchor4 = 63.300（0.87x），同轮
+  证据（不再是跨轮）。S2 仍仅 cards8 带宽口径弱阳。anchor4 自身极差
+  17.97%（cards4 漂移史延续，该档证据弱依旧）。
+
+**裁决 4：噪声机制收窄到 CPU gather 段（三方互洽）——NUMA 落点抽签**
+
+- anchor8（纯 npu）repeat 极差 **3.96%** vs confirm8（hybrid）**43~63%**
+  ——噪声是 hybrid/cpu 路径特有，非机器整体漂移。
+- 逐 repeat 明细：cf0.4 r1 216.0 / r3 136.8 / r4 217.3 / r6 138.6
+  GB/s——run 间翻倍摆动，且同一 cf 内高/低档分明。
+- 与 R4 per-device 双峰（drafts/die_bimodality_r4.md：die3/7 gather 快
+  1.74x）互洽：worker 每 run 重新 spawn，DRAM 池页 NUMA 落点重新抽签，
+  cpu_gather 段对落点敏感，npu kernel 不经 host DRAM 访问故稳。
+- 机制归因标注**推测**，但三方证据互洽；R6 以 NUMA 绑定实验直接裁决。
+
+**结论性判断**：hybrid 相对 npu 的真实收益在带宽口径 +4%、延迟口径
+打平、且不可复现（极差 43~63%）——**S2 对生产的价值存疑冻结**。
+噪声机制本身成为更大靶点：若 NUMA 归置把 hybrid 各 run 稳定到分布
+上沿（cf0.4 r1/r4 档 216~217 GB/s），对 anchor 的收益是 **+26%**
+而非 +4%。资源转向 NUMA 归因实锤（见 §R6）。
+
+**下一步**：R6 = NUMA 主菜（拓扑取证 + cpu/hybrid 绑定扫描）+
+同轮 anchor 哨兵。队列深度扫描继续顺延（R7 候选）。
+
+---
+
 ## §R4-旧 派单：hybrid 细 frac 扫描 + pretouch/THP 查 gather 相位成分（2026-10-15，蓝区）
 
 ### 目标
