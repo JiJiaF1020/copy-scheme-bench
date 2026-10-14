@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: R2 派单已发出（R1 判读完成，见 §R1 判读节），等待交付。
+- Current owner: **绿区**。Status: R4 派单已发出（R3 判读完成，见 §R3 判读节），等待交付。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,104 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R3 派单：窗口化流水压 host 开销 + cpu/hybrid 同坐标复试（2026-10-15，蓝区）
+## §R4 派单：hybrid 细 frac 扫描 + pretouch/THP 查 gather 相位成分（2026-10-15，蓝区）
+
+### 目标
+
+R3 判读：host 压减有效（超预期），S1 翻正未达成（w16 cpu/npu 0.88~0.89x），
+S2 重开候选成立（hybrid cf0.5 于 cards4/8 < min(npu, w16 cpu)）。本轮两件事：
+
+1. **hybrid 细 frac 扫描**（w16，overlap，cards4/8，cf∈{0.1,0.25,0.4,0.6}）：
+   找最优分流点 cf*，看最优 cf 能否过同轮 npu 锚点（S2 阳性裁决）。
+2. **pretouch / THP 查 w16 cpu gather 相位（28.3µs）的成分**：缺页（pretouch
+   可消）？TLB miss（THP 可消）？还是纯带宽 bound（两者皆不动）？
+
+队列深度（npu 侧余量）顺延 R5 候选。本轮无代码改动，纯测量。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题为
+   "R4: §R4 派单（hybrid 细 frac 扫描 + pretouch/THP 查 gather 成分）"。
+2. 蓝图仓不变：`git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `QUEUE_DEPTH = 8`；**不需要重编**。
+3. 环境变量无残留（同 §R1 前置核验第 5 条）。
+
+### 执行命令
+
+逐字执行（工作目录 /home/h2d_test/copy-scheme-bench）：
+
+```bash
+git pull --ff-only && git log --oneline -1
+cd tests && python3 test_scheme_tools.py && cd ..
+# A: hybrid 细 frac 扫描（48 case）
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 0.25 0.4 0.6 \
+  --hybrid-modes overlap --cards 4 8 --batch-size 24 --copy-count 0 100 300 \
+  --window 16 --repeat 2 --results-dir results/r4/frac
+# B: cpu + pretouch（24 case）
+bash run_scheme_sweep.sh --schemes cpu --cards 1 2 4 8 --batch-size 24 \
+  --copy-count 0 100 300 --window 16 --pretouch --repeat 2 \
+  --results-dir results/r4/pretouch
+# C: THP=always + pretouch（24 case）；自记录原值、自恢复
+THP_EN_ORIG=$(sed 's/.*\[\(.*\)\].*/\1/' /sys/kernel/mm/transparent_hugepage/enabled)
+THP_DE_ORIG=$(sed 's/.*\[\(.*\)\].*/\1/' /sys/kernel/mm/transparent_hugepage/defrag)
+echo "orig: enabled=$THP_EN_ORIG defrag=$THP_DE_ORIG"
+echo always > /sys/kernel/mm/transparent_hugepage/enabled
+echo always > /sys/kernel/mm/transparent_hugepage/defrag
+cat /sys/kernel/mm/transparent_hugepage/enabled /sys/kernel/mm/transparent_hugepage/defrag
+bash run_scheme_sweep.sh --schemes cpu --cards 1 2 4 8 --batch-size 24 \
+  --copy-count 0 100 300 --window 16 --pretouch --repeat 2 \
+  --results-dir results/r4/pretouch_thp
+echo "$THP_EN_ORIG" > /sys/kernel/mm/transparent_hugepage/enabled
+echo "$THP_DE_ORIG" > /sys/kernel/mm/transparent_hugepage/defrag
+cat /sys/kernel/mm/transparent_hugepage/enabled /sys/kernel/mm/transparent_hugepage/defrag
+# D: 轮内基线 cpu w16（8 case；B/C 的比较基准，防跨轮漂移）
+bash run_scheme_sweep.sh --schemes cpu --cards 1 8 --batch-size 24 \
+  --copy-count 0 300 --window 16 --repeat 2 --results-dir results/r4/base
+# E: npu 漂移哨兵（2 case；S2 判据的同轮 npu 值）
+bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 24 \
+  --copy-count 300 --window 16 --repeat 2 --results-dir results/r4/anchor
+```
+
+共 106 case（蓝区 dry-run 已核验各组 case 数 48/24/24/8/2）。若 C 组 THP
+节点不存在或无权限：原样记录报错，跳过 C 组，其余组照常执行（不算整轮失败）。
+
+### 通过标准
+
+- R4-G1：自检末两行 `Ran 39 tests` / `OK`。
+- R4-G2：五个 manifest 全 `status=="passed"`；106 个 case JSON 全 passed、
+  correctness 全 true；全部 case JSON `config.window==16`；pretouch/pretouch_thp
+  两组 `config.pretouch==true`、base 组 `==false`（防串组）。
+- R4-G3：C 组三次 cat 输出回传——「orig」行记录原值；设置后那次
+  enabled/defrag 均显示 `[always]`；收尾那次恢复原值（与 orig 一致）。
+- R4-G4（跨轮一致性，非门槛）：D 组 vs §R3 w16 同坐标（cpu cards1/8
+  copy0/300）偏差 ≤15%；超出原样回传注明。
+
+### 回传格式
+
+同 §R3：交付模板 + 五个目录的 `copy_scheme_timing_summary.md` 全文 +
+五个 manifest 全文 + 4 个 case JSON 全文——B/C/D 组 cpu cards1 copy100 各一
+（看 gather 相位成分）、A 组 hybrid cards8 copy300 cf0.25 一个（看最优区
+phases）+ C 组三次 cat 输出原文。
+
+### 判读预案（派单时写死）
+
+- 比较口径：同轮同坐标，avg_us_mean 用 repeat 折叠值；`p99/p50 > 2` 的坐标
+  标注「波动大，证据弱」。
+- **S2 阳性**：A 组最优 cf 的 hybrid copy300 cards8 带宽 ≥ 同轮 E 组 npu
+  anchor ⇒ S2 阳性，转入生产形态评估（vLLM 集成形态）。
+- frac 曲线：给出 cards4/8 各 copy 档的最优分流点 cf*；若曲线在边界取最优
+  （无内点极小），如实记录并标注「边界最优」。
+- **缺页实锤**：B 组 cpu_gather_us 较 D 组同坐标降 >15%。
+- **TLB 实锤**：C 组 cpu_gather_us 较 B 组同坐标再降 >10%。
+- B、C 均无明显下降 ⇒ gather 相位为纯带宽 bound，CPU 侧无更多可压空间，
+  资源转 R5（队列深度）或集合层方向。
+- 顺带回填 breakeven 模型：用 w16 实测 T0_cpu（5.1~6.6µs）重算交叉点 ρ*
+  表，对照 drafts/breakeven_r2_preview.md 的预测（copy300 档 0.64→0.37）。
+- 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
+
+---
+
+## §R3-旧 派单：窗口化流水压 host 开销 + cpu/hybrid 同坐标复试（2026-10-15，蓝区）
 
 ### 目标
 

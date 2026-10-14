@@ -12,6 +12,18 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R4 hybrid 细 frac 扫描 + pretouch/THP 查 gather 成分（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+无代码改动，纯测量轮。A) hybrid w16/overlap 细 frac（cf∈{0.1,0.25,0.4,0.6}×
+cards48×copy{0,100,300}×repeat2，48 case）；B) cpu w16+pretouch（24 case）；
+C) THP=always+pretouch（24 case，自记原值自恢复）；D) cpu w16 轮内基线
+（8 case）；E) npu cards8 copy300 锚点（2 case）；共 106（蓝区 dry-run 已
+核验）。通过标准 R4-G1..G4 与判读预案（S2 阳性 / frac 最优点 / 缺页实锤 /
+TLB 实锤 / gather 纯带宽 bound / breakeven 回填）见 pingpong.md §R4。
+**交付**：待绿区回传。
+**判读**：待交付后蓝区填写。
+
 ## §R3 窗口化流水压 host 开销 + 复试（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
