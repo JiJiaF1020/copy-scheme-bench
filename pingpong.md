@@ -35,7 +35,79 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R4 派单：hybrid 细 frac 扫描 + pretouch/THP 查 gather 相位成分（2026-10-15，蓝区）
+## §R5 派单：S2 弱阳性同轮高重复确认跑（2026-10-15，蓝区）
+
+### 目标
+
+R4 判读 S2 **弱阳性**：hybrid cf0.4/cf0.1 cards8 copy300 = 178.90/178.41
+GB/s ≥ 同轮 npu anchor 171.26（+4.5%/+4.2%），但 frac 曲线非单调
+（cf0.25 凹陷 157.39，相邻档摆动 ±10%）——**边际与 run 级噪声同量级**。
+本轮用更高重复数（repeat 6）同轮复测最优区 + 加密曲线（cf0.15/0.3），
+判定 S2 是真阳性还是噪声伪影；cards4 次要确认。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R5: §R5 派单」。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；未重编。
+3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
+   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
+
+### 执行命令
+
+```bash
+cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
+cd tests && python3 test_scheme_tools.py && cd ..
+
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 0.15 0.3 0.4 --hybrid-modes overlap --cards 8 --batch-size 24 --copy-count 300 --window 16 --repeat 6 --results-dir results/r5/confirm8
+
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 0.25 --hybrid-modes overlap --cards 4 --batch-size 24 --copy-count 300 --window 16 --repeat 4 --results-dir results/r5/confirm4
+
+bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 24 --copy-count 300 --window 16 --repeat 6 --results-dir results/r5/anchor8
+
+bash run_scheme_sweep.sh --schemes npu --cards 4 --batch-size 24 --copy-count 300 --window 16 --repeat 4 --results-dir results/r5/anchor4
+```
+
+共 42 case（24/8/6/4，蓝区 dry-run 已核验；iters=1000 默认与 R4 一致，
+不改第二变量）。
+
+### 通过标准
+
+- R5-G1：自检末两行 `Ran 40 tests` / `OK`。
+- R5-G2：四个 manifest 全 `status=="passed"`；42 个 case JSON 全 passed、
+  correctness 全 true；hybrid 组 `config.window==16` 且
+  `hybrid_mode=="overlap"`、`cpu_frac` 与组一致。
+- R5-G3：每个 case JSON 含 `performance.latency_us.p50/p99`（迭代级分位数）。
+- R5-G4（跨轮一致性，非门槛）：anchor8 与 §R4 E 组同坐标（171.264 GB/s）
+  偏差 ≤15%；超出原样回传注明。
+
+### 回传格式
+
+同 §R4：交付模板 + 四个目录的 `copy_scheme_timing_summary.md` 全文 +
+四个 manifest 全文 + 3 个 case JSON 全文——confirm8 cf0.1 的 r1 与 r6
+各一（看 repeat 内 phases/分位数稳定性）+ anchor8 r1 一个。
+
+### 判读预案（派单时写死）
+
+- 比较口径：同轮同坐标，avg_us_mean/带宽用 repeat 折叠值；`p99/p50 > 2`
+  标注「波动大，证据弱」；同 case 6 次 repeat 的带宽极差 (max-min)/min
+  >10% 标注「不稳」。
+- **S2 确认（强阳性）**：confirm8 最优 cf 的折叠带宽 ≥ anchor8 折叠带宽
+  ×1.05，且该 cf 的 repeat 带宽极差 ≤5% ⇒ S2 强阳性，R6 进入生产形态
+  集成评估（vLLM 层间流水嵌入，蓝区设计稿定稿）+ pretouch 纳入默认配置。
+- **弱阳性维持**：最优 cf ≥ anchor8 但不满足上一条 ⇒ 收益存疑，生产形态
+  设计稿照写但全程标注「收益存疑，未确认」。
+- **翻回阴性**：最优 cf < anchor8 ⇒ R4 阳性为噪声伪影，S2 不成立，R6 =
+  队列深度扫描（drafts/R5_queue_depth.md 改编号 R6 派出）。
+- cards4：confirm4 最优 cf vs anchor4 同口径比较（参考项；cards4 档有
+  连续两轮漂移史，证据弱，单独标注）。
+- 曲线形态：cf ∈ {0.1, 0.15, 0.3, 0.4} 若相邻档仍 >10% 非单调摆动 ⇒
+  噪声主导、cf* 不可分辨，生产形态稿按 cf=0.1（R4 延迟口径最稳档）写死。
+
+---
+
+## §R4-旧 派单：hybrid 细 frac 扫描 + pretouch/THP 查 gather 相位成分（2026-10-15，蓝区）
 
 ### 目标
 

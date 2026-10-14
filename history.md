@@ -12,6 +12,20 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R5 S2 弱阳性同轮高重复确认跑（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+无代码改动，纯测量轮。R4 判 S2 弱阳性（hybrid cf0.4/0.1 cards8 copy300
+超同轮 npu anchor +4.5%/+4.2%，但边际与 run 噪声同量级），本轮高重复
+确认：A) hybrid cf∈{0.1,0.15,0.3,0.4}×cards8×copy300×repeat6（24 case，
+最优区确认+曲线加密）；B) hybrid cf∈{0.1,0.25}×cards4×copy300×repeat4
+（8 case，次要确认）；C) npu anchor cards8 copy300×repeat6（6 case，同轮
+锚）；D) npu anchor cards4 copy300×repeat4（4 case）；共 42（蓝区 dry-run
+已核验）。通过标准 R5-G1..G4 与判读预案（强阳性/弱阳性维持/翻回阴性
+三分支）见 pingpong.md §R5。
+**交付**（commit 本轮 push 后回填）：
+**判读**：待交付后蓝区填写。
+
 ## §R4 hybrid 细 frac 扫描 + pretouch/THP 查 gather 成分（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
