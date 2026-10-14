@@ -43,13 +43,20 @@ combo cards8 ≥ 同轮 anchor×1.05 且 repeat_spread 无 UNSTABLE ⇒ 正式�
 
 ## 分支 B：R5 弱阳性维持 ⇒ 累积证据 + NUMA 扫描（S5 首开）
 
+> **优先级上调**（2026-10-15）：R4 A 组 per-device phases 发现 die 双峰
+> （drafts/die_bimodality_r4.md——die3/7 gather 快 1.74x，疑似池页 NUMA
+> 落点），NUMA 潜在收益（全 die 提到快档 = gather -43%）远超 hybrid 的
+> +4.5% 边际。**即使 R5 强阳性，也建议把本分支的 NUMA 部分并入分支 A
+> 一起跑**（增量仅 12 case）。
+
 **目标**：收益存疑状态下不加码生产投入，转两个低成本信息增益：
 (a) hybrid cf0.1 cards8 copy300 再跑 repeat 8 累积分布证据；
 (b) NUMA 绑定扫描（S5 从未测过）：`--numa-nodes` 提供后 sweep 自动对
 每个 case 跑不绑定/绑定两遍（命名带 `_numa` 后缀），查 CPU 路径 DRAM
-访问是否跨 NUMA 掉速。worker 侧绑定命令为
-`numactl --cpunodebind=<node> --membind=<node>`（按 rank 取节点号，
-run_scheme_multiprocess.py:124-126）。
+访问是否跨 NUMA 掉速——**若绑定后全 die gather 趋近 ~161µs 档，
+die 双峰归因实锤，且产出正式配置（池页 NUMA 策略 + 绑核）**。worker
+侧绑定命令为 `numactl --cpunodebind=<node> --membind=<node>`（按 rank
+取节点号，run_scheme_multiprocess.py:124-126）。
 
 ```bash
 cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
