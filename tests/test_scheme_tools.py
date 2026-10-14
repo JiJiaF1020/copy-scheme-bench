@@ -24,6 +24,7 @@ from scatter_config import BYTES_PER_TOKEN, COPY_CAP_DEFAULT  # noqa: E402
 
 import run_scheme_sweep  # noqa: E402
 import scheme_churn  # noqa: E402
+import scheme_churn_synth  # noqa: E402
 import scheme_report  # noqa: E402
 import scheme_workload as wl  # noqa: E402
 import test_scheme_worker  # noqa: E402
@@ -176,6 +177,48 @@ class ChurnTests(unittest.TestCase):
             scheme_churn.analyze_trace(['{"no_indices": 1}'], 128, (1.0,))
         with self.assertRaises(ValueError):
             scheme_churn.analyze_trace(['[1,2]'], 0, (1.0,))
+
+
+class ChurnSynthTests(unittest.TestCase):
+    def test_keep_one_constant_set(self):
+        records = scheme_churn_synth.gen_trace(steps=10, k=100, keep=1.0, seed=7)
+        report = scheme_churn.analyze_trace([json.dumps(r) for r in records], 128, (1.0,))
+        self.assertEqual(report["None"]["adjacent_overlap"]["mean"], 1.0)
+
+    def test_keep_zero_near_zero_overlap(self):
+        records = scheme_churn_synth.gen_trace(steps=10, k=100, keep=0.0, seed=7)
+        report = scheme_churn.analyze_trace([json.dumps(r) for r in records], 128, (1.0,))
+        self.assertLess(report["None"]["adjacent_overlap"]["mean"], 0.05)
+
+    def test_regime_shift_drops_overlap_once_per_period(self):
+        # keep=1 within a regime, shift every 10 steps, 20 steps ->
+        # 19 adjacent pairs: 18 kept, 1 broken.
+        records = scheme_churn_synth.gen_trace(steps=20, k=100, keep=1.0,
+                                               shift_every=10, seed=7)
+        report = scheme_churn.analyze_trace([json.dumps(r) for r in records], 128, (1.0,))
+        self.assertAlmostEqual(report["None"]["adjacent_overlap"]["mean"], 18 / 19)
+
+    def test_determinism_and_uniqueness(self):
+        first = scheme_churn_synth.gen_trace(steps=10, k=100, seed=7)
+        second = scheme_churn_synth.gen_trace(steps=10, k=100, seed=7)
+        self.assertEqual(first, second)
+        for record in first:
+            self.assertEqual(len(set(record["indices"])), 100)
+
+    def test_layers_group_independently(self):
+        records = scheme_churn_synth.gen_trace(steps=10, k=50, layers=3, seed=7)
+        report = scheme_churn.analyze_trace([json.dumps(r) for r in records], 128, (1.0,))
+        self.assertEqual(sorted(report), ["0", "1", "2"])
+        for stats in report.values():
+            self.assertEqual(stats["steps"], 10)
+
+    def test_invalid_requests(self):
+        for kwargs in ({"keep": 1.5}, {"hot_pool": 50}, {"vocab": 50, "hot_pool": 100},
+                       {"steps": 0}, {"shift_every": -1}):
+            base = {"steps": 10, "k": 100}
+            base.update(kwargs)
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                scheme_churn_synth.gen_trace(**base)
 
 
 class ReportTests(unittest.TestCase):

@@ -75,5 +75,6 @@ unset SCATTER_C8_QUEUE_DEPTH
    「host 开销压减复试」：合并 launch、减少同步点后的 cpu 复试
    （需蓝区先改 worker，工作量一轮）。
 3. **R2 显示 cpu gather 相位仍是纯 gather 瓶颈** ⇒ R4 改派 churn 轴负载：
-   绿区用合成 trace（蓝区生成，随派单附文件）跑驻留+增量模拟，
-   不依赖真实 indexer dump。
+   绿区用合成 trace 跑驻留+增量模拟——生成器已就绪
+   （`tools/churn_synth.py`，参数化 ρ/热池/相变周期/层数，演示见
+   `drafts/churn_synth_demo.md`），不依赖真实 indexer dump。
