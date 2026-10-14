@@ -37,5 +37,12 @@ H2D 72.4µs 与未归类 host 开销 ~72µs（占 37%）。逐条裁决见 pingp
 4 case）+ 全量主矩阵 60 case。通过标准 R2-G1..G4 与判读预案见 pingpong.md §R2
 （S1/S2 判据沿用 §R1 未移动；新增「未归类 host 开销 >30% ⇒ S1 阴性（host 开销
 主导），先压 host 开销再复试」分支）。
-**交付**（commit 本轮 push 后回填）：R2-G1 自检 22 tests OK；R2-G2 定点回归 4 case 全 passed（cpu copy0=68.505µs / copy100=187.589µs=8.393 GB/s；hybrid copy0=109.968µs / copy100=257.277µs=6.119 GB/s，correctness 全 true，cpu×copy0 无 AttributeError）；R2-G3 主矩阵 60 case 全 passed（manifest passed、case_count=60、correctness 全 true）；R2-G4 npu 12 坐标 vs §R1 附表偏差——cards1/2/8 ≤3.72%，cards4 档 copy100=66.662(25.01%)/copy300=65.714(19.89%) 超 15% ⇒ 环境漂移，npu 基线跨轮不可比，一切对比以 R2 轮内坐标为准。数据出处：results/r2_regression/ + results/copy_scheme_a5_c8/（gitignore 不入库）。
-**判读**：待交付后蓝区填写。
+**交付**（commit 02a18dc）：R2-G1 自检 22 tests OK；R2-G2 定点回归 4 case 全 passed（cpu copy0=68.505µs / copy100=187.589µs=8.393 GB/s；hybrid copy0=109.968µs / copy100=257.277µs=6.119 GB/s，correctness 全 true，cpu×copy0 无 AttributeError）；R2-G3 主矩阵 60 case 全 passed（manifest passed、case_count=60、correctness 全 true）；R2-G4 npu 12 坐标 vs §R1 附表偏差——cards1/2/8 ≤3.72%，cards4 档 copy100=66.662(25.01%)/copy300=65.714(19.89%) 超 15% ⇒ 环境漂移，npu 基线跨轮不可比，一切对比以 R2 轮内坐标为准。数据出处：results/r2_regression/ + results/copy_scheme_a5_c8/（gitignore 不入库）。
+**判读**（蓝区，2026-10-15）：**S1 阴性（host 开销主导）**——cpu copy300 全坐标
+< npu（18.2~109.8 vs 34.0~168.5 GB/s），回归同坐标未归类 host 开销 65.4µs
+占 34.9%（>30% 阈值）、copy0 时 56.9µs（83.1%）；固定开销随 die 数上涨
+（71.8→119.8µs，npu 恒 ~11µs），主体是每迭代 launch/sync 串行成本；边际成本
+（模型反推）cpu 26~36 vs npu 18~40 ns/token，cards4/8 已持平，净输在固定开销。
+**S2 阳性候选不成立**——hybrid 无坐标 < min(npu,cpu)，其 copy0 开销
+107~152µs 高于 cpu，overlap 不藏反伤。下一步按写死分支：R3 压 host 开销
+（窗口化流水）+ 同坐标复试。逐条裁决见 pingpong.md §R2 判读节。
