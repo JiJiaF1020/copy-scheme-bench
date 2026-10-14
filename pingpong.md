@@ -396,6 +396,56 @@ anchor: {"schema_version":2,"status":"passed","dtype":"c8","timestamp_utc":"2026
 - npu 锚点（同轮）：copy300 cards1 33.987/cards4 76.696/cards8 170.740 GB/s；copy0 11.0-11.6µs。
 **异常**：无。
 
+### 判读（§R3，2026-10-15，蓝区）
+
+对照 §R3「判读预案」（派单时写死）逐条裁决（除注明外均为绿区**实测值**，
+repeat 折叠后均值）：
+
+**门槛**：R3-G1 ✓（38 项 OK）/ R3-G2 ✓（108 case 全 passed、correctness 全
+true、window 分档正确）/ R3-G3 ✓（w1 对 R2 同坐标最大偏差 14.77% ≤15%）。
+
+**口径修正（蓝区自我纠偏）**：§R2 判读备注的相位映射 `h2d_scatter_us ≡
+device_wall_us` 不准确。R2 数据的数值证据给出正确映射：`h2d_scatter_us
+(75.6) ≈ device_event_us (76.8)`（同坐标 w1，差 1.6%），`R2 未归类开销
+(65.4) ≈ device_overhead_us (58.8)`（同一量级）——旧口径的「未归类」
+主体是逐迭代同步等待，新口径已并入 device_wall 并以 device_overhead
+单列（实测值互洽，非口径游戏）。
+
+**裁决 1：host 压减有效（写死判据命中，超预期）**
+
+- 判据「w16 未归类 host 开销占比 <10%」：w16 cpu cards1 copy100 的
+  device_overhead=6.0µs，占 avg 86.7µs 的 **6.9% < 10%** ✓（w1 为
+  58.8/181.7=32.4%）。
+- copy0 纯固定开销（实测）：cpu 69.2/74.8/92.4/114.2µs（w1，cards1/2/4/8）
+  → **5.1/5.2/5.9/6.6µs（w16）**，压缩 ~94%，已低于 npu launch 量级（~11µs）。
+- 附带效应：gather 相位 46.1→28.3µs（w1→w16，同坐标）——去掉交错同步后
+  host 侧 gather 本身也提速 ~39%（实测值；机制推测为线程调度/缓存连续性，
+  标注为**推测**）。
+- 延迟分布健康：w16 p99/p50=1.56（cpu copy100 cards1），无长尾恶化。
+
+**裁决 2：S1 翻正未达成，但差距收敛到 0.88~0.89x**
+
+- 写死判据「w16 cpu ≥ 同轮 npu 锚点（copy300, cards4/8）」：cards4
+  67.4 < 76.7 GB/s（0.88x）；cards8 151.7 < 170.7 GB/s（0.89x）⇒ **未翻正**。
+- 注意 cards4 锚点本轮 76.7 vs R2 65.7 vs R1 82.0 GB/s——cards4 档连续
+  两轮漂移，该坐标证据弱；cards8 锚点稳定（168.5→170.7）。
+- 趋势（实测）：w1→w16 后 cpu/npu 比从 0.53~0.84x 收敛到 0.88~0.89x；
+  剩余差距主要在 device_event（H2D+scatter 实传段，52.4µs vs npu kernel
+  全程 ~48.5µs/同 tokens 档——cpu 路径的 PCIe 大包 DMA + 设备侧 scatter
+  两次写 vs kernel 直写一次，结构性多一遍）。
+
+**裁决 3：S2 重开候选成立（cards4/8）**
+
+- 写死判据「w16 hybrid < 同坐标 min(npu, w16 cpu)」（copy300）：cards1
+  26.7 > 23.3 ✗；cards4 52.7 < 67.4 ✓；cards8 144.5 < 151.7 ✓ ⇒
+  **候选成立（2/3 坐标）**，且 hybrid w16 的 h2d_scatter_tail 相位仅
+  5.4µs（cards1 copy100）——overlap 在窗口化下真正藏住了 CPU 段。
+- 按预案「下轮扫细 frac」执行，见 §R4。
+
+**下一步**：R4 = hybrid 细 frac 扫描（w16，找最优分流点+能否过 npu）
++ pretouch/THP 查 w16 cpu gather 相位（28.3µs）的缺页/TLB 成分。
+队列深度（npu 侧余量）顺延为 R5 候选。
+
 ---
 
 ## §R2-旧 派单：修复后重跑主矩阵（2026-10-15，蓝区）

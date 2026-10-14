@@ -22,8 +22,17 @@ B) w16 吞吐模式 48 case、C) npu 锚点 12 case（cpu/hybrid×cards1248×
 copy{0,100,300}×repeat2，npu×cards148×copy{0,300}×repeat2，共 108）。
 通过标准 R3-G1..G3 与判读预案（host 压减有效性 / S1 翻正 / S2 重开 /
 cpu 判死转集合层）见 pingpong.md §R3。
-**交付**（commit 本轮 push 后回填）：R3-G1 自检 38 tests OK；R3-G2 三 manifest（w1/w16/anchor）全 passed、108 case 全 passed 且 correctness 全 true、window 分档正确（w1=48×1、w16=48×16、anchor=12×1）；R3-G3 w1 cpu/hybrid 24 坐标 vs §R2 同坐标（cf0.5）偏差最大 14.77%（hybrid cards8 copy100），全部 ≤15%。主键实测：cpu copy100 cards1 181.716→86.718µs（w1→w16，8.66→18.16 GB/s）、copy300 cards8 106.94→151.74 GB/s；hybrid copy100 cards1 263.792→162.861µs（5.97→9.67 GB/s）、copy300 cards8 90.44→144.46 GB/s；cpu copy0 cards1 69.195→5.053µs。npu 锚点 copy300 cards1/4/8=33.99/76.70/170.74 GB/s。phases（cpu copy100 cards1）：w1 cpu_gather 46.096 + device_wall 135.621（event 76.819/overhead 58.802）；w16 28.264 + 58.454（event 52.436/overhead 6.018）。数据出处：results/r3/{w1,w16,anchor}/（gitignore 不入库）。
-**判读**：待交付后蓝区填写。
+**交付**（commit 14bf82d）：R3-G1 自检 38 tests OK；R3-G2 三 manifest（w1/w16/anchor）全 passed、108 case 全 passed 且 correctness 全 true、window 分档正确（w1=48×1、w16=48×16、anchor=12×1）；R3-G3 w1 cpu/hybrid 24 坐标 vs §R2 同坐标（cf0.5）偏差最大 14.77%（hybrid cards8 copy100），全部 ≤15%。主键实测：cpu copy100 cards1 181.716→86.718µs（w1→w16，8.66→18.16 GB/s）、copy300 cards8 106.94→151.74 GB/s；hybrid copy100 cards1 263.792→162.861µs（5.97→9.67 GB/s）、copy300 cards8 90.44→144.46 GB/s；cpu copy0 cards1 69.195→5.053µs。npu 锚点 copy300 cards1/4/8=33.99/76.70/170.74 GB/s。phases（cpu copy100 cards1）：w1 cpu_gather 46.096 + device_wall 135.621（event 76.819/overhead 58.802）；w16 28.264 + 58.454（event 52.436/overhead 6.018）。数据出处：results/r3/{w1,w16,anchor}/（gitignore 不入库）。
+**判读**（蓝区，2026-10-15）：**host 压减有效（超预期）**——copy0 纯固定开销
+69~114µs→5~7µs（-94%，低于 npu launch 量级），device_overhead 58.8→6.0µs
+（占 avg 6.9%<10% 写死判据）；gather 相位附带提速 46.1→28.3µs。**S1 翻正未
+达成**——w16 cpu/npu 锚点 copy300：cards8 151.7 vs 170.7（0.89x）、cards4
+67.4 vs 76.7（0.88x，cards4 档连续两轮漂移证据弱）；差距从 w1 的 0.53~0.84x
+收敛。**S2 重开候选成立**——w16 hybrid < min(npu, w16 cpu) 于 cards4/8 命中
+（52.7<67.4、144.5<151.7），cards1 不命中；h2d_scatter_tail 仅 5.4µs，
+overlap 在窗口化下真正藏住 CPU 段。口径纠偏：R2「未归类开销」≈ 新口径
+device_overhead_us（数值互洽）。下一步 R4：hybrid 细 frac 扫描 +
+pretouch/THP 查 gather 成分；队列深度顺延 R5 候选。
 
 ## §R1 A5 首轮主矩阵：npu vs cpu vs hybrid（2026-10-14）
 
