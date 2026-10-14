@@ -132,6 +132,1503 @@ phases）+ C 组三次 cat 输出原文。
 
 ---
 
+---
+
+### 交付（§R4，2026-10-15，绿区）
+
+**执行环境**：机器 work21（141.61.33.21）openEuler aarch64；8× Ascend950DT_9572（可见设备 0-7）；宿主 root；CANN 9.2.0（/usr/local/Ascend/ascend-toolkit/latest）；时间 2026-10-14T18:48Z–19:10Z（A frac 18:48–18:58、B pretouch 18:58–19:03、C THP+pretouch 19:03–19:08、D base 19:08–19:09、E anchor 19:09–19:10）。
+**前置核验**：1) 本仓 `git pull --ff-only` 后 `git log --oneline -1` = `c6e5f62` "R4: §R4 派单（hybrid 细 frac 扫描 + pretouch/THP 查 gather 成分）" ✓；2) 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2` ✓；`QUEUE_DEPTH = 8` ✓；未重编 ✓；3) 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH / NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配 ✓。
+**执行**：逐字命令 A–E 五组（见派单）串行执行（r4_sweep.sh 包装：tee 日志 + RC + DONE 标记，命令本体未改）。A/B/C/D/E 各组 RC=0；共 106 case（48/24/24/8/2）。
+**通过标准**：
+- R4-G1 ✓：自检末两行 `Ran 39 tests` / `OK`。
+- R4-G2 ✓：五个 manifest 全 `status=="passed"`；106 case JSON 全 passed、correctness 全 true；全部 case JSON `config.window==16`；pretouch/pretouch_thp 组 `config.pretouch==true`、base 组 `==false`（r4_verify.py：case_jsons_checked=106, bad=0）。
+- R4-G3 ✓：C 组三次 THP cat 输出见下（orig=madvise → 设置后双 `[always]` → 恢复后回 `[madvise]` 与 orig 一致）。
+- R4-G4 ✓（非门槛）：D 组 vs §R3 w16 同坐标（cpu cards1/8 copy0/300）最大偏差 9.58% ≤ 15%（逐坐标见下）。
+
+**timing_summary.md [frac] 全文**（/home/h2d_test/copy-scheme-bench/results/r4/frac/copy_scheme_timing_summary.md）：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| hybrid | 0 | 0.1 | overlap | 4 | 24 | 0 | 35.564 | 41.099 | 0.000 |
+| hybrid | 0 | 0.1 | overlap | 4 | 24 | 100 | 194.366 | 202.660 | 32.454 |
+| hybrid | 0 | 0.1 | overlap | 4 | 24 | 300 | 276.595 | 292.730 | 72.725 |
+| hybrid | 0 | 0.1 | overlap | 8 | 24 | 0 | 33.619 | 36.029 | 0.000 |
+| hybrid | 0 | 0.1 | overlap | 8 | 24 | 100 | 161.832 | 175.961 | 78.244 |
+| hybrid | 0 | 0.1 | overlap | 8 | 24 | 300 | 212.060 | 219.553 | 178.414 |
+| hybrid | 0 | 0.25 | overlap | 4 | 24 | 0 | 33.762 | 35.536 | 0.000 |
+| hybrid | 0 | 0.25 | overlap | 4 | 24 | 100 | 190.794 | 197.162 | 33.040 |
+| hybrid | 0 | 0.25 | overlap | 4 | 24 | 300 | 273.335 | 283.693 | 75.395 |
+| hybrid | 0 | 0.25 | overlap | 8 | 24 | 0 | 35.295 | 45.811 | 0.000 |
+| hybrid | 0 | 0.25 | overlap | 8 | 24 | 100 | 154.972 | 164.522 | 81.455 |
+| hybrid | 0 | 0.25 | overlap | 8 | 24 | 300 | 254.010 | 302.419 | 157.394 |
+| hybrid | 0 | 0.4 | overlap | 4 | 24 | 0 | 34.144 | 35.729 | 0.000 |
+| hybrid | 0 | 0.4 | overlap | 4 | 24 | 100 | 193.310 | 205.496 | 32.671 |
+| hybrid | 0 | 0.4 | overlap | 4 | 24 | 300 | 351.275 | 357.697 | 53.842 |
+| hybrid | 0 | 0.4 | overlap | 8 | 24 | 0 | 36.054 | 44.182 | 0.000 |
+| hybrid | 0 | 0.4 | overlap | 8 | 24 | 100 | 164.669 | 182.153 | 76.782 |
+| hybrid | 0 | 0.4 | overlap | 8 | 24 | 300 | 216.906 | 265.078 | 178.897 |
+| hybrid | 0 | 0.6 | overlap | 4 | 24 | 0 | 34.693 | 39.383 | 0.000 |
+| hybrid | 0 | 0.6 | overlap | 4 | 24 | 100 | 197.834 | 208.654 | 31.900 |
+| hybrid | 0 | 0.6 | overlap | 4 | 24 | 300 | 346.620 | 384.047 | 55.414 |
+| hybrid | 0 | 0.6 | overlap | 8 | 24 | 0 | 36.638 | 46.542 | 0.000 |
+| hybrid | 0 | 0.6 | overlap | 8 | 24 | 100 | 176.987 | 199.352 | 71.671 |
+| hybrid | 0 | 0.6 | overlap | 8 | 24 | 300 | 267.305 | 303.461 | 146.371 |
+```
+
+**timing_summary.md [pretouch] 全文**（/home/h2d_test/copy-scheme-bench/results/r4/pretouch/copy_scheme_timing_summary.md）：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 0 | 4.926 | 4.926 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 100 | 81.644 | 81.644 | 19.284 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 300 | 182.306 | 182.306 | 25.908 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 0 | 5.357 | 5.400 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 100 | 94.191 | 101.003 | 33.909 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 300 | 200.263 | 200.767 | 47.172 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 0 | 5.415 | 5.760 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 100 | 114.800 | 124.676 | 55.870 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 300 | 264.437 | 288.202 | 73.077 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 0 | 6.788 | 7.303 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 100 | 100.219 | 117.968 | 128.408 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 255.303 | 313.438 | 154.046 |
+```
+
+**timing_summary.md [pretouch_thp] 全文**（/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/copy_scheme_timing_summary.md）：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 0 | 4.925 | 4.925 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 100 | 86.323 | 86.323 | 18.240 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 300 | 184.037 | 184.037 | 25.665 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 0 | 5.455 | 5.479 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 100 | 94.061 | 97.811 | 33.597 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 300 | 193.210 | 194.516 | 48.943 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 0 | 5.606 | 5.729 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 100 | 126.077 | 137.322 | 50.321 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 300 | 307.739 | 313.669 | 61.423 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 0 | 7.102 | 7.783 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 100 | 116.254 | 131.954 | 110.392 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 319.324 | 399.361 | 125.025 |
+```
+
+**timing_summary.md [base] 全文**（/home/h2d_test/copy-scheme-bench/results/r4/base/copy_scheme_timing_summary.md）：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 0 | 5.102 | 5.102 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 300 | 184.237 | 184.237 | 25.639 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 0 | 7.190 | 7.569 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 277.124 | 357.522 | 144.526 |
+```
+
+**timing_summary.md [anchor] 全文**（/home/h2d_test/copy-scheme-bench/results/r4/anchor/copy_scheme_timing_summary.md）：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| npu | 0 | 0.5 | overlap | 8 | 24 | 300 | 221.860 | 234.950 | 171.264 |
+```
+
+**五个 manifest**（status / timestamp_utc / case_files 数）：
+
+| dir | status | timestamp_utc | cases |
+|---|---|---|---|
+
+| frac | passed | 2026-10-14T18:48:29.664751+00:00 | 48 |
+
+| pretouch | passed | 2026-10-14T18:58:50.328122+00:00 | 24 |
+
+| pretouch_thp | passed | 2026-10-14T19:03:32.909873+00:00 | 24 |
+
+| base | passed | 2026-10-14T19:08:13.504860+00:00 | 8 |
+
+| anchor | passed | 2026-10-14T19:09:49.287080+00:00 | 2 |
+
+**C 组三次 THP cat 输出原文**（run_r4.log）：
+```
+
+orig: enabled=madvise defrag=madvise
+always [madvise] never
+always defer defer+madvise [madvise] never
+[always] madvise never
+[always] defer defer+madvise madvise never
+===C===
+Running cpu_cards1_bs24_copy0_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy0_rf0p0_r1.log
+Running cpu_cards1_bs24_copy0_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy0_rf0p0_r2.log
+Running cpu_cards1_bs24_copy100_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy100_rf0p0_r1.log
+Running cpu_cards1_bs24_copy100_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy100_rf0p0_r2.log
+Running cpu_cards1_bs24_copy300_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy300_rf0p0_r1.log
+Running cpu_cards1_bs24_copy300_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards1_bs24_copy300_rf0p0_r2.log
+Running cpu_cards2_bs24_copy0_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy0_rf0p0_r1.log
+Running cpu_cards2_bs24_copy0_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy0_rf0p0_r2.log
+Running cpu_cards2_bs24_copy100_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy100_rf0p0_r1.log
+Running cpu_cards2_bs24_copy100_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy100_rf0p0_r2.log
+Running cpu_cards2_bs24_copy300_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy300_rf0p0_r1.log
+Running cpu_cards2_bs24_copy300_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards2_bs24_copy300_rf0p0_r2.log
+Running cpu_cards4_bs24_copy0_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy0_rf0p0_r1.log
+Running cpu_cards4_bs24_copy0_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy0_rf0p0_r2.log
+Running cpu_cards4_bs24_copy100_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy100_rf0p0_r1.log
+Running cpu_cards4_bs24_copy100_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy100_rf0p0_r2.log
+Running cpu_cards4_bs24_copy300_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy300_rf0p0_r1.log
+Running cpu_cards4_bs24_copy300_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards4_bs24_copy300_rf0p0_r2.log
+Running cpu_cards8_bs24_copy0_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy0_rf0p0_r1.log
+Running cpu_cards8_bs24_copy0_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy0_rf0p0_r2.log
+Running cpu_cards8_bs24_copy100_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy100_rf0p0_r1.log
+Running cpu_cards8_bs24_copy100_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy100_rf0p0_r2.log
+Running cpu_cards8_bs24_copy300_rf0p0_r1; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy300_rf0p0_r1.log
+Running cpu_cards8_bs24_copy300_rf0p0_r2; log=/home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/cpu_cards8_bs24_copy300_rf0p0_r2.log
+scheme  run_frac  cpu_frac  hybrid_mode  cards  batch_size  copy_count  avg_us_mean  avg_us_max  avg_bandwidth
+   cpu         0       0.5      overlap      1          24           0        4.925       4.925          0.000
+   cpu         0       0.5      overlap      1          24         100       86.323      86.323         18.240
+   cpu         0       0.5      overlap      1          24         300      184.037     184.037         25.665
+   cpu         0       0.5      overlap      2          24           0        5.455       5.479          0.000
+   cpu         0       0.5      overlap      2          24         100       94.061      97.811         33.597
+   cpu         0       0.5      overlap      2          24         300      193.210     194.516         48.943
+   cpu         0       0.5      overlap      4          24           0        5.606       5.729          0.000
+   cpu         0       0.5      overlap      4          24         100      126.077     137.322         50.321
+   cpu         0       0.5      overlap      4          24         300      307.739     313.669         61.423
+   cpu         0       0.5      overlap      8          24           0        7.102       7.783          0.000
+   cpu         0       0.5      overlap      8          24         100      116.254     131.954        110.392
+   cpu         0       0.5      overlap      8          24         300      319.324     399.361        125.025
+Saved: /home/h2d_test/copy-scheme-bench/results/r4/pretouch_thp/copy_scheme_timing_summary.csv
+STAGE_C_RC=0
+===C-THP-RESTORED===
+always [madvise] never
+always defer defer+madvise [madvise] never
+```
+
+**R4-G4 逐坐标**（D 组 vs §R3 w16 同坐标，repeat 折叠 avg_us_mean）：
+```
+
+coord                              R3w16_us  R4base_us     dev%
+
+cpu_cards1_bs24_copy0_rf0p0           5.053      5.102     0.97
+
+cpu_cards1_bs24_copy300_rf0p0      202.924    184.237     9.21
+
+cpu_cards8_bs24_copy0_rf0p0           6.561      7.190     9.58
+
+cpu_cards8_bs24_copy300_rf0p0      263.169    277.124     5.30
+
+MAX_ABS_DEV%=9.58
+```
+
+**4 个 case JSON 全文**：
+
+
+###FILE:B/pretouch###
+```json
+{
+  "schema_version": 2,
+  "test": "a5_kvcache_copy_scheme_multiprocess",
+  "status": "passed",
+  "timestamp_utc": "2026-10-14T18:59:24.668072+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1,
+  "devices": [
+    0
+  ],
+  "same_seed": true,
+  "config": {
+    "dtype": "c8",
+    "row_bytes": 656,
+    "batch_size": 24,
+    "source_len": 65536,
+    "hbm_slots": 8192,
+    "copy_min": 100,
+    "copy_max": 100,
+    "copy_cap": 16384,
+    "warmup": 10,
+    "iters": 1000,
+    "seed": 7,
+    "allow_non_a5": false,
+    "scheme": "cpu",
+    "run_frac": 0.0,
+    "cpu_frac": 0.5,
+    "hybrid_mode": "overlap",
+    "cpu_threads": 8,
+    "pretouch": true,
+    "window": 16,
+    "numa_nodes": ""
+  },
+  "summary": {
+    "avg_us_mean": 81.69047999999991,
+    "avg_us_max": 81.69047999999991,
+    "avg_bandwidth": 19.272747571075623,
+    "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400,
+    "all_correct": true
+  },
+  "per_device": [
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:59:21.871401+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:0",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 100,
+        "copy_max": 100,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "cpu",
+        "run_frac": 0.0,
+        "cpu_frac": 0.5,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": true,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100
+        ],
+        "copied_tokens": 2400,
+        "cpu_tokens": 0,
+        "payload_bytes_per_iteration": 1574400
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 100,
+        "avg_us_mean": 81.69047999999991,
+        "avg_us_max": 81.69047999999991,
+        "avg_bandwidth": 19.272747571075623
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 81.69047999999991,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 81.69047999999967,
+          "p50": 75.32875,
+          "p90": 101.9225,
+          "p99": 138.195625,
+          "min": 73.27625,
+          "max": 138.195625,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "cpu_gather_us": 26.731340000000003,
+          "device_wall_us": 54.95913999999999,
+          "device_event_us": 49.186088263988495,
+          "device_overhead_us": 5.773051736011498
+        }
+      },
+      "rank": 0,
+      "logical_device_index": 0
+    }
+  ]
+}
+
+```
+
+###FILE:C/pretouch_thp###
+```json
+{
+  "schema_version": 2,
+  "test": "a5_kvcache_copy_scheme_multiprocess",
+  "status": "passed",
+  "timestamp_utc": "2026-10-14T19:04:06.327425+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1,
+  "devices": [
+    0
+  ],
+  "same_seed": true,
+  "config": {
+    "dtype": "c8",
+    "row_bytes": 656,
+    "batch_size": 24,
+    "source_len": 65536,
+    "hbm_slots": 8192,
+    "copy_min": 100,
+    "copy_max": 100,
+    "copy_cap": 16384,
+    "warmup": 10,
+    "iters": 1000,
+    "seed": 7,
+    "allow_non_a5": false,
+    "scheme": "cpu",
+    "run_frac": 0.0,
+    "cpu_frac": 0.5,
+    "hybrid_mode": "overlap",
+    "cpu_threads": 8,
+    "pretouch": true,
+    "window": 16,
+    "numa_nodes": ""
+  },
+  "summary": {
+    "avg_us_mean": 86.99071999999964,
+    "avg_us_max": 86.99071999999964,
+    "avg_bandwidth": 18.09848222890909,
+    "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400,
+    "all_correct": true
+  },
+  "per_device": [
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T19:04:03.334299+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:0",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 100,
+        "copy_max": 100,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "cpu",
+        "run_frac": 0.0,
+        "cpu_frac": 0.5,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": true,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100
+        ],
+        "copied_tokens": 2400,
+        "cpu_tokens": 0,
+        "payload_bytes_per_iteration": 1574400
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 100,
+        "avg_us_mean": 86.99071999999964,
+        "avg_us_max": 86.99071999999964,
+        "avg_bandwidth": 18.09848222890909
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 86.99071999999964,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 86.9907199999998,
+          "p50": 85.775,
+          "p90": 89.635,
+          "p99": 127.775,
+          "min": 82.570625,
+          "max": 127.775,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "cpu_gather_us": 28.056609999999992,
+          "device_wall_us": 58.93411000000002,
+          "device_event_us": 53.29691195487976,
+          "device_overhead_us": 5.637198045120255
+        }
+      },
+      "rank": 0,
+      "logical_device_index": 0
+    }
+  ]
+}
+
+```
+
+###FILE:D/base###
+```json
+{
+  "schema_version": 2,
+  "test": "a5_kvcache_copy_scheme_multiprocess",
+  "status": "passed",
+  "timestamp_utc": "2026-10-14T19:08:47.866667+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1,
+  "devices": [
+    0
+  ],
+  "same_seed": true,
+  "config": {
+    "dtype": "c8",
+    "row_bytes": 656,
+    "batch_size": 24,
+    "source_len": 65536,
+    "hbm_slots": 8192,
+    "copy_min": 300,
+    "copy_max": 300,
+    "copy_cap": 16384,
+    "warmup": 10,
+    "iters": 1000,
+    "seed": 7,
+    "allow_non_a5": false,
+    "scheme": "cpu",
+    "run_frac": 0.0,
+    "cpu_frac": 0.5,
+    "hybrid_mode": "overlap",
+    "cpu_threads": 8,
+    "pretouch": false,
+    "window": 16,
+    "numa_nodes": ""
+  },
+  "summary": {
+    "avg_us_mean": 182.6161299999997,
+    "avg_us_max": 182.6161299999997,
+    "avg_bandwidth": 25.864089880778916,
+    "total_payload_bytes_per_iteration": 4723200,
+    "copied_tokens_sum_per_iteration": 7200,
+    "all_correct": true
+  },
+  "per_device": [
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T19:08:45.070016+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:0",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "cpu",
+        "run_frac": 0.0,
+        "cpu_frac": 0.5,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 0,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 182.6161299999997,
+        "avg_us_max": 182.6161299999997,
+        "avg_bandwidth": 25.864089880778916
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 182.6161299999997,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 182.61612999999875,
+          "p50": 181.56125,
+          "p90": 184.919375,
+          "p99": 242.11375,
+          "min": 176.421875,
+          "max": 242.11375,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "cpu_gather_us": 69.02941,
+          "device_wall_us": 113.58672,
+          "device_event_us": 105.53224939107895,
+          "device_overhead_us": 8.054470608921052
+        }
+      },
+      "rank": 0,
+      "logical_device_index": 0
+    }
+  ]
+}
+
+```
+
+###FILE:A/frac_hybrid_cards8_copy300_cf0p25###
+```json
+{
+  "schema_version": 2,
+  "test": "a5_kvcache_copy_scheme_multiprocess",
+  "status": "passed",
+  "timestamp_utc": "2026-10-14T18:53:25.250583+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 8,
+  "devices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "same_seed": true,
+  "config": {
+    "dtype": "c8",
+    "row_bytes": 656,
+    "batch_size": 24,
+    "source_len": 65536,
+    "hbm_slots": 8192,
+    "copy_min": 300,
+    "copy_max": 300,
+    "copy_cap": 16384,
+    "warmup": 10,
+    "iters": 1000,
+    "seed": 7,
+    "allow_non_a5": false,
+    "scheme": "hybrid",
+    "run_frac": 0.0,
+    "cpu_frac": 0.25,
+    "hybrid_mode": "overlap",
+    "cpu_threads": 8,
+    "pretouch": false,
+    "window": 16,
+    "numa_nodes": ""
+  },
+  "summary": {
+    "avg_us_mean": 259.4926812500004,
+    "avg_us_max": 296.4943300000003,
+    "avg_bandwidth": 154.20061312221608,
+    "total_payload_bytes_per_iteration": 37785600,
+    "copied_tokens_sum_per_iteration": 57600,
+    "all_correct": true
+  },
+  "per_device": [
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.215990+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:0",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 294.2852500000022,
+        "avg_us_max": 294.2852500000022,
+        "avg_bandwidth": 16.049734059046337
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 294.2852500000022,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 294.2852500000012,
+          "p50": 296.52125,
+          "p90": 307.554375,
+          "p99": 397.29,
+          "min": 175.111875,
+          "max": 397.29,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 284.6283700000001,
+          "h2d_scatter_tail_us": 9.656880000000005,
+          "kernel_event_us": 284.1626890897751
+        }
+      },
+      "rank": 0,
+      "logical_device_index": 0
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.207279+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:1",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 282.32988999999964,
+        "avg_us_max": 282.32988999999964,
+        "avg_bandwidth": 16.729365778451605
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 282.32988999999964,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 282.3298900000016,
+          "p50": 278.83875,
+          "p90": 291.780625,
+          "p99": 376.228125,
+          "min": 265.28,
+          "max": 376.228125,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 273.52639,
+          "h2d_scatter_tail_us": 8.803500000000001,
+          "kernel_event_us": 272.9458272457123
+        }
+      },
+      "rank": 1,
+      "logical_device_index": 1
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.214710+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:2",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 289.45696999999893,
+        "avg_us_max": 289.45696999999893,
+        "avg_bandwidth": 16.317451260544935
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 289.45696999999893,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 289.45696999999996,
+          "p50": 286.735,
+          "p90": 300.615,
+          "p99": 379.82875,
+          "min": 237.189375,
+          "max": 379.82875,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 280.7143699999999,
+          "h2d_scatter_tail_us": 8.742600000000003,
+          "kernel_event_us": 280.4544677734375
+        }
+      },
+      "rank": 2,
+      "logical_device_index": 2
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.094929+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:3",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 173.3438900000009,
+        "avg_us_max": 173.3438900000009,
+        "avg_bandwidth": 27.24757128734088
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 173.3438900000009,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 173.34388999999913,
+          "p50": 172.674375,
+          "p90": 176.194375,
+          "p99": 211.145,
+          "min": 166.315,
+          "max": 211.145,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 167.06895999999998,
+          "h2d_scatter_tail_us": 6.27493,
+          "kernel_event_us": 166.82114684581757
+        }
+      },
+      "rank": 3,
+      "logical_device_index": 3
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.220627+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:4",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 296.4943300000003,
+        "avg_us_max": 296.4943300000003,
+        "avg_bandwidth": 15.930152863294202
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 296.4943300000003,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 296.4943300000012,
+          "p50": 301.74,
+          "p90": 310.453125,
+          "p99": 396.703125,
+          "min": 173.9025,
+          "max": 396.703125,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 285.81708999999995,
+          "h2d_scatter_tail_us": 10.67724,
+          "kernel_event_us": 285.5232570171356
+        }
+      },
+      "rank": 4,
+      "logical_device_index": 4
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.216527+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:5",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 293.89662000000095,
+        "avg_us_max": 293.89662000000095,
+        "avg_bandwidth": 16.070957195764908
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 293.89662000000095,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 293.89661999999845,
+          "p50": 296.04125,
+          "p90": 310.039375,
+          "p99": 390.38375,
+          "min": 173.299375,
+          "max": 390.38375,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 284.11985000000004,
+          "h2d_scatter_tail_us": 9.776769999999999,
+          "kernel_event_us": 283.89583945274353
+        }
+      },
+      "rank": 5,
+      "logical_device_index": 5
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.207716+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:6",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 284.7617600000003,
+        "avg_us_max": 284.7617600000003,
+        "avg_bandwidth": 16.58649672624581
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 284.7617600000003,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 284.7617600000006,
+          "p50": 282.4925,
+          "p90": 296.23,
+          "p99": 364.55625,
+          "min": 262.7025,
+          "max": 364.55625,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 275.08822999999995,
+          "h2d_scatter_tail_us": 9.67353,
+          "kernel_event_us": 274.31344962120056
+        }
+      },
+      "rank": 6,
+      "logical_device_index": 6
+    },
+    {
+      "schema_version": 2,
+      "test": "a5_kvcache_copy_scheme_singlecard",
+      "status": "passed",
+      "timestamp_utc": "2026-10-14T18:53:22.083043+00:00",
+      "device_count": 1,
+      "config": {
+        "device": "npu:7",
+        "device_name": "Ascend950DT_9572",
+        "dtype": "c8",
+        "row_bytes": 656,
+        "batch_size": 24,
+        "source_len": 65536,
+        "hbm_slots": 8192,
+        "copy_min": 300,
+        "copy_max": 300,
+        "copy_cap": 16384,
+        "warmup": 10,
+        "iters": 1000,
+        "seed": 7,
+        "scheme": "hybrid",
+        "run_frac": 0.0,
+        "cpu_frac": 0.25,
+        "hybrid_mode": "overlap",
+        "cpu_threads": 8,
+        "pretouch": false,
+        "staging_pinned": true,
+        "window": 16,
+        "queue_depth": 8
+      },
+      "workload": {
+        "copy_counts": [
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300,
+          300
+        ],
+        "copied_tokens": 7200,
+        "cpu_tokens": 1800,
+        "payload_bytes_per_iteration": 4723200
+      },
+      "correctness": {
+        "data_exact": true,
+        "guard_unchanged": true,
+        "zero_count_unchanged": true,
+        "first_fill_capacity": true,
+        "metadata_unchanged": true
+      },
+      "summary": {
+        "cards": 1,
+        "batch_size": 24,
+        "copy_count": 300,
+        "avg_us_mean": 161.3727399999998,
+        "avg_us_max": 161.3727399999998,
+        "avg_bandwidth": 29.268883951527414
+      },
+      "performance": {
+        "timer": "perf_counter",
+        "avg_us": 161.3727399999998,
+        "avg_us_host_synced": null,
+        "latency_us": {
+          "mean": 161.37273999999957,
+          "p50": 161.25,
+          "p90": 165.185625,
+          "p99": 205.66,
+          "min": 149.761875,
+          "max": 205.66,
+          "n": 1000
+        },
+        "window": 16,
+        "phases": {
+          "launch_to_gather_done_us": 155.39473000000007,
+          "h2d_scatter_tail_us": 5.978009999999999,
+          "kernel_event_us": 155.36250507831573
+        }
+      },
+      "rank": 7,
+      "logical_device_index": 7
+    }
+  ]
+}
+
+```
+
+**breakeven 回填（w16 实测 T0_cpu 重算 ρ＊）**：`python3 tools/breakeven.py` 于 R4 base+anchor 与 §R3 anchor 合并目录（R4 同轮优先，cards1 缺同轮 npu 用 §R3 anchor 值，已注）。输出（节选 crossover）：
+```
+cards1 bs24 cpu copy300: T0=5.1us T_full=184.2us marginal=24.88ns/token
+cards1 bs24 npu copy300: T0=11.0us T_full=139.0us marginal=17.77ns/token
+  crossover cards1 bs24 copy300: npu_full=139.0us vs cpu(T0=5.1, span=179.1) => rho*=0.25 (cpu-delta wins for rho > 0.25)
+cards8 bs24 cpu copy300: T0=7.2us T_full=277.1us marginal=37.49ns/token
+cards8 bs24 npu copy300: T0=11.6us T_full=222.6us marginal=29.31ns/token
+  crossover cards8 bs24 copy300: npu_full=222.6us vs cpu(T0=7.2, span=269.9) => rho*=0.20 (cpu-delta wins for rho > 0.20)
+```
+T0_cpu(w16) 实测 5.102/7.190µs（D 组 copy0，cards1/8）。对照 drafts/breakeven_r2_preview.md 预测（copy300 档 cards1 0.64→0.37），实际 ρ＊ 左移至 0.25/0.20。
+
+**观察（只事实，判读留蓝区）**：
+- A 组 frac（hybrid w16 overlap，repeat 折叠 avg_us_mean / 带宽 GB/s）：cards8 copy300 = cf0.1 212.06µs/178.41、cf0.25 254.01µs/157.39、cf0.4 216.91µs/178.90、cf0.6 267.31µs/146.37；cards4 copy300 = 72.73/75.40/53.84/55.41（cf0.1/0.25/0.4/0.6）。同轮 E 组 npu anchor cards8 copy300 = 221.86µs / 171.26 GB/s。cf0.25（max 302.4 vs mean 254.0）与 cf0.6（max 303.5 vs 267.3）档 cards8 波动较大。
+- B pretouch（cpu w16，cpu_gather_us）：cards1 copy100 = 26.731（§R3 w16 同坐标 28.264，-5.4%，跨轮参考）；同轮 copy300：cards1 69.053 vs D base 69.029（持平）、cards8 136.195 vs D base r1 253.258（-46.2%）。B cards8 copy300 折叠 255.303µs/154.05 GB/s vs D 折叠 277.124µs/144.53 GB/s。
+- C THP+pretouch（cpu w16，cpu_gather_us）：cards1 copy100 = 28.057 vs B 26.731（+5.0%）；copy300 cards1 69.077 vs B 69.053（持平）；cards8 179.394 vs B 136.195（+31.7%，仍低于 D base r1 253.258 的 -29.2%）。
+- p99/p50（latency_us）：B cards1 copy100 138.2/75.3=1.83、C 127.8/85.8=1.49、D cards1 copy300 242.1/181.6=1.33、A cards8 cf0.25 die0 397.3/296.5=1.34——均 <2，无坐标触发「波动大」标注；但 cards8 copy300 档 avg_us_max 明显高于 mean（D 357.5 vs 277.1、B 313.4 vs 255.3、C 399.4 vs 319.3），cards8 长尾显著。
+
+**异常/备注**：
+- D 组（base）派单命令为 `--copy-count 0 300`，无 copy100 坐标；回传格式「B/C/D 组 cpu cards1 copy100 各一」中 D 组无法提供 copy100，改用 D 组 cpu cards1 copy300 case（同组同坐标看 gather 相位），特此注明。
+- 缺页判据「B 组 cpu_gather 较 D 组同坐标降 >15%」：D 组无 copy100，copy100 档缺同轮 D 坐标可比；同轮可比的为 copy300（B vs D：cards8 -46.2%、cards1 持平）；B copy100 vs §R3 w16 copy100 为跨轮参考（-5.4%）。判读权在蓝区。
+- R4-G4 参考值取 results/r3/w16 同坐标 case（repeat 折叠）。
+- breakeven cards1 的 npu_full 139.0µs 取自 §R3 anchor（跨轮，R4 E 组仅 cards8）；cards8 为 R4 同轮。
+
 ## §R3-旧 派单：窗口化流水压 host 开销 + cpu/hybrid 同坐标复试（2026-10-15，蓝区）
 
 ### 目标
