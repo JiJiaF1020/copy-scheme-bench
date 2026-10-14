@@ -94,8 +94,10 @@ def model(rows: list[dict]) -> list[str]:
                 if span_cpu <= 0:
                     continue
                 rho_star = 1 - (t_npu - t0_cpu) / span_cpu
+                # rho* < 0: cpu-full (rho=0) already beats npu-full; rho* > 1:
+                # even cpu's fixed cost T0 exceeds npu-full.
                 verdict = ("cpu-delta wins for rho > " f"{rho_star:.2f}" if 0 <= rho_star <= 1
-                           else ("cpu-delta never wins" if rho_star < 0 else "cpu-delta always wins"))
+                           else ("cpu-delta always wins" if rho_star < 0 else "cpu-delta never wins"))
                 lines.append(f"  crossover cards{cards} bs{batch} copy{npu_row['copy_count']}: "
                              f"npu_full={t_npu:.1f}us vs cpu(T0={t0_cpu:.1f}, span={span_cpu:.1f}) "
                              f"=> rho*={rho_star:.2f} ({verdict})")

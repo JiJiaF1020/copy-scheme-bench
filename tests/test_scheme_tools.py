@@ -281,6 +281,27 @@ class ReportTests(unittest.TestCase):
                                  capture_output=True, text=True)
         self.assertIn("no passed case JSONs", out.stdout + out.stderr)
 
+    def test_breakeven_crossover_out_of_range_labels(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/breakeven.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # rho* > 1: npu-full (50us) undercuts cpu's fixed cost T0=71.8 -> cpu never wins.
+            (root / "a0.json").write_text(json.dumps(fixture(scheme="cpu", copies=0, latencies=(71.8,))))
+            (root / "a300.json").write_text(json.dumps(fixture(scheme="cpu", copies=300, latencies=(500.0,))))
+            (root / "b0.json").write_text(json.dumps(fixture(scheme="npu", copies=0, latencies=(11.0,))))
+            (root / "b300.json").write_text(json.dumps(fixture(scheme="npu", copies=300, latencies=(50.0,))))
+            # rho* < 0 (batch=4): cpu-full (120us) already beats npu-full (1000us) -> always wins.
+            (root / "c0.json").write_text(json.dumps(fixture(scheme="cpu", copies=0, batch=4, latencies=(20.0,))))
+            (root / "c300.json").write_text(json.dumps(fixture(scheme="cpu", copies=300, batch=4, latencies=(120.0,))))
+            (root / "d0.json").write_text(json.dumps(fixture(scheme="npu", copies=0, batch=4, latencies=(11.0,))))
+            (root / "d300.json").write_text(json.dumps(fixture(scheme="npu", copies=300, batch=4, latencies=(1000.0,))))
+            out = subprocess.run([sys.executable, str(tool), str(root)],
+                                 capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("rho*=1.05 (cpu-delta never wins)", out.stdout)
+        self.assertIn("cpu-delta always wins", out.stdout)
+
     def test_breakeven_table_md_roundtrip(self):
         import subprocess
         tool = Path(__file__).resolve().parents[1] / "tools/breakeven_table.py"
