@@ -31,6 +31,16 @@ copy stage → `execute_sparse_attention`。hybrid 只改 copy stage 的内部
   bench 完全一致：BLOCK=128、COPY_CAP=16384、-1 填充）按行切两段——
   前 `ceil(rows×(1-cf))` 行走 kernel，尾部走 CPU。切分在 host 侧
   metadata 组装时完成，零设备端改动。
+- **集成面已核实**（2026-10-15 读码，vLLM-ascend-DSA）：runtime 当前全部
+  copy 走独立 kernel `a5_kvcache_scatter_copy_c8`，**仅两处调用点**
+  （runtime.py:944 `execute_decode_selection`、runtime.py:1044
+  `execute_shared_decode_selection`），参数同为三件套
+  `(topk_index, topk_slots, miss_count)`——hybrid 切分 = 三件套用同一
+  行界 K 切片，K 按 `copy_counts` 累计值反解使 CPU 份额 ≈cf（bench
+  scheme_workload.py 的 hybrid 切分即此逻辑）。**融合算子
+  `fused_copy_sfa_c8` 已注册但尚无生产调用点**（仅 ops.py 定义 +
+  contracts.py 注释提及），故本稿的集成目标是独立 kernel 路径，
+  无 MIX 核内资源配比问题（见 §5.4 的残留风险）。
 - **cf 推荐值**：**0.1（静态）**。依据 R4：延迟口径 cf0.1 全档最稳
   （avg_us_mean 212.06 / avg_us_max 219.55，max/mean 仅 1.04；cf0.4 吞吐
   略高但 max/mean 1.22 有长尾）。生产 decode 对尾延迟敏感，取稳不取尖。
@@ -75,10 +85,11 @@ slot）压掉了 host 固定开销（copy0 69~114µs→5~7µs，-94%，R3 实测
 3. **cards8 长尾**：copy300 档 avg_us_max/mean 最高 1.29（D 组），hybrid
    cf0.1 档最稳但也有 1.04→极端 run 的尾延迟行为未表征（R5 的 repeat 6
    会给 6 点分布）。
-4. **融合 kernel 的切分代价未知**：bench 的 hybrid 是独立 copy  kernel
-   +旁流；生产若用 `fused_copy_sfa_c8`，切分后 kernel 侧 rows 减 10%
-   对 MIX 形态（copy 与 attention 的核内资源配比）的影响未测——这是
-   bench 到生产的**语义 gap**，需要 R6+ 在 vLLM 仓内做融合形态实测。
+4. **融合 kernel 的切分代价未知（已降级为残留风险）**：读码确认融合算子
+   尚无生产调用点，故独立 kernel 路径的 hybrid 集成不触及 MIX 形态问题；
+   但若未来切到 `fused_copy_sfa_c8`，切分后 kernel 侧 rows 减 10% 对 MIX
+   形态（copy 与 attention 的核内资源配比）的影响仍未测——届时需要一轮
+   融合形态实测。
 5. **ρ 敏感性**：breakeven 模型 ρ*（copy300）=0.25/0.20（cards1/8）——
    hybrid 收益前提是回搬量占池子的比例 ρ 足够低或 churn 稳态驻留够高；
    若业务 ρ 形态剧变（长上下文整体换入换出），结论需重估。
@@ -86,8 +97,9 @@ slot）压掉了 host 固定开销（copy0 69~114µs→5~7µs，-94%，R3 实测
 ## 6. 验证路线（派单队列）
 
 - R5（在途）：S2 弱阳性同轮高重复确认。
-- R6 候选 a（R5 强阳性时）：vLLM 仓内融合形态实测（`fused_copy_sfa_c8`
-  切分 cf=0.1 vs 不切分，e2e decode 延迟）——生产化判决性实验。
+- R6 候选 a（R5 强阳性时）：vLLM 仓内独立 kernel 路径集成实测——
+  两处调用点（runtime.py:944/:1044）接入行级切分（cf=0.1），e2e decode
+  延迟对比不切分基线——生产化判决性实验。
 - R6 候选 b（R5 翻回阴性时）：队列深度扫描（drafts/R5_queue_depth.md
   改编号）查 npu 侧余量。
 - R6 候选 c（任意分支都可叠加）：pretouch 纳入默认配置后的复测 +
