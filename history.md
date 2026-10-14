@@ -94,3 +94,26 @@ H2D 72.4µs 与未归类 host 开销 ~72µs（占 37%）。逐条裁决见 pingp
 **S2 阳性候选不成立**——hybrid 无坐标 < min(npu,cpu)，其 copy0 开销
 107~152µs 高于 cpu，overlap 不藏反伤。下一步按写死分支：R3 压 host 开销
 （窗口化流水）+ 同坐标复试。逐条裁决见 pingpong.md §R2 判读节。
+
+## §R5 S2 弱阳性同轮高重复确认跑（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+蓝区 §R4 判读 S2 弱阳性（hybrid cf0.4/cf0.1 cards8 copy300 = 178.90/178.41
+GB/s ≥ 同轮 npu anchor 171.26，但 frac 曲线非单调、边际与 run 级噪声同量级），
+派 S2 同轮高重复确认跑：confirm8 hybrid cf{0.1,0.15,0.3,0.4} cards8 copy300
+w16 repeat6（24 case）、confirm4 hybrid cf{0.1,0.25} cards4 copy300 repeat4
+（8 case）、anchor8/anchor4 npu（6/4 case），共 42 case（蓝区 dry-run 已核验，
+iters=1000 默认）。判读预案三分支（强阳性 / 弱阳性维持 / 翻回阴性）与回传格式
+（交付模板 + 4 timing_summary 全文 + 4 manifest 全文 + 3 case JSON）见
+pingpong.md §R5。
+**交付**（commit 本轮 push 后回填）：R5-G1 自检 40 tests OK；R5-G2 四 manifest
+全 passed + 42 case 全 passed + correctness 全 true + hybrid window==16/
+overlap/cpu_frac 一致（r5_verify2 bad=0）；R5-G3 32 hybrid case 含
+latency_us.p50/p99，10 npu case 无 latency_us 字段（结构性差异，p50/p99 在
+latency_us_synced，逐 case 已核）；R5-G4 anchor8 折叠 171.343 GB/s vs §R4 E
+171.264（+0.05% ≤15%）。关键实测（折叠带宽）：confirm8 cf0.1/0.15/0.3/0.4 =
+167.849/161.415/164.463/178.175 GB/s，最优 cf0.4 vs anchor8 171.343 =
+1.0399（+3.99%）；confirm8 各 cf repeat 带宽极差 43~63% 全「不稳」；p99/p50
+42 case 全 <2；confirm4 54.823/53.807 均 < anchor4 63.300（参考项）。数据出处：
+results/r5/（gitignore 不入库）+ run_r5.log。判读留蓝区（§R5 判读预案三分支
+输入已齐：折叠带宽/极差/p99/p50/跨轮对照）。
