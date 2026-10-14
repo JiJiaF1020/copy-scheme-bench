@@ -5,7 +5,7 @@
 > 扫描顺延：若 R5 翻回阴性，本稿改编号 R6 派出；若 R5 强阳性/弱阳性维持，
 > 本稿与 pretouch 组合复测一并排入 R6+ 候选队列。
 >
-> 定稿待办：~~自检项数按当时实际更新~~（已确认 40 项，2026-10-15 03:07 本地
+> 定稿待办：~~自检项数按当时实际更新~~（已确认 41 项，2026-10-15 06:50 本地
 > 自检通过，R5 派出时绿区 pull 的 main 含 53f124e 回归测试）；~~results 目录
 > 前缀~~（派出时按实际轮次改）；~~for 循环展开~~（已平铺，见下）。剩余定稿
 > 动作：派出时把 results 前缀与自检项数按当时实际刷新。
@@ -50,19 +50,19 @@ tools/build_queue_depth.sh 4
 export SCATTER_C8_QUEUE_DEPTH=4
 bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
   --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
-  --results-dir results/r5/qd4
+  --results-dir results/r7/qd4
 
 tools/build_queue_depth.sh 8
 export SCATTER_C8_QUEUE_DEPTH=8
 bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
   --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
-  --results-dir results/r5/qd8
+  --results-dir results/r7/qd8
 
 tools/build_queue_depth.sh 16
 export SCATTER_C8_QUEUE_DEPTH=16
 bash run_scheme_sweep.sh --cards 1 4 8 --batch-size 24 \
   --copy-count 100 300 --schemes npu --iters 200 --repeat 3 \
-  --results-dir results/r5/qd16
+  --results-dir results/r7/qd16
 
 tools/build_queue_depth.sh 8
 unset SCATTER_C8_QUEUE_DEPTH
@@ -70,7 +70,7 @@ unset SCATTER_C8_QUEUE_DEPTH
 
 ## 通过标准（草稿）
 
-- R5-G1：自检 40 项 OK（`Ran 40 tests`）；每次 build_queue_depth.sh 后 grep
+- R7-G1：自检 41 项 OK（`Ran 41 tests`）；每次 build_queue_depth.sh 后 grep
   输出 `QUEUE_DEPTH = <D>` 与目标一致。
 - R5-G2：三个 manifest 全 passed，54 个 case correctness 全 true，
   每个 JSON 的 `queue_depth` 字段与组一致（防 tag 串组）。
