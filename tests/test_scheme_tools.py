@@ -281,6 +281,23 @@ class ReportTests(unittest.TestCase):
                                  capture_output=True, text=True)
         self.assertIn("no passed case JSONs", out.stdout + out.stderr)
 
+    def test_breakeven_table_md_roundtrip(self):
+        import subprocess
+        tool = Path(__file__).resolve().parents[1] / "tools/breakeven_table.py"
+        cases = [fixture(scheme="npu", copies=0, latencies=(11.0,)),
+                 fixture(scheme="npu", copies=300, latencies=(138.7,))]
+        text = scheme_report.format_table(scheme_report.build_rows(cases), markdown=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "summary.md"
+            path.write_text(text)
+            out_file = subprocess.run([sys.executable, str(tool), str(path)],
+                                      capture_output=True, text=True)
+            out_stdin = subprocess.run([sys.executable, str(tool)],
+                                       input=text, capture_output=True, text=True)
+        self.assertEqual(out_file.returncode, 0, out_file.stderr)
+        self.assertIn("marginal=141.89ns/token", out_file.stdout)
+        self.assertEqual(out_file.stdout, out_stdin.stdout)
+
     def test_repeats_fold_into_one_row_with_std(self):
         import statistics
         from scatter_results import effective_bandwidth

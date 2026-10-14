@@ -129,6 +129,7 @@ copy-scheme-bench/tools/build_queue_depth.sh 8   # 用完恢复
 python3 tools/churn_synth.py --steps 500 --k 2048 --keep 0.85 --out trace.jsonl  # 或真实 indexer dump（同格式 jsonl）
 python3 tools/churn_analysis.py trace.jsonl        # ρ、LRU 驻留命中率、block 碎片度
 python3 tools/breakeven.py results/copy_scheme_a5_c8  # T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
+python3 tools/breakeven_table.py summary.md           # 同上，但输入是粘贴的 md 汇总表（交付判读用）
 ```
 
 演示与结论见 `drafts/churn_synth_demo.md`（LRU@1x 是病点、热池按 1.5~2x
