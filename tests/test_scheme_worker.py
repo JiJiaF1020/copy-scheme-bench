@@ -233,15 +233,20 @@ def cpu_gather(case: Case) -> None:
     """CPU path phase 1: gather rows from the DRAM mirror into pinned staging.
 
     Reads host DRAM directly - no PCIe round trip per row. index_select is
-    multithreaded by torch (see --cpu-threads).
+    multithreaded by torch (see --cpu-threads). No-op when this scheme's share
+    is empty (copy=0, or hybrid with cpu_frac rounding to zero).
     """
     src = case.cpu_phys_src if case.cpu_phys_src is not None else case.phys_src_all
+    if src.numel() == 0:
+        return
     case.staging.copy_(case.dram_flat_cpu.index_select(0, src))
 
 
 def cpu_device_pass(case: Case) -> None:
     """CPU path phase 2: one big H2D of the staging buffer + scatter to dst slots."""
     dst = case.cpu_phys_dst_npu if case.cpu_phys_dst_npu is not None else case.phys_dst_all_npu
+    if dst.numel() == 0:
+        return
     case.staging_npu.copy_(case.staging, non_blocking=True)
     case.hbm_flat.index_copy_(0, dst, case.staging_npu)
 

@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: R1 派单已发出，等待交付。
+- Current owner: **绿区**。Status: R2 派单已发出（R1 判读完成，见 §R1 判读节），等待交付。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,73 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R1 派单：A5 首轮主矩阵（2026-10-14，蓝区）
+## §R2 派单：修复后重跑主矩阵（2026-10-15，蓝区）
+
+### 目标
+
+拿到 npu / cpu / hybrid 同轮完整的 60 case 主矩阵，支撑 S1/S2 裁决
+（判据沿用 §R1「判读预案」，未移动）。
+
+### 背景（蓝区已做的修复）
+
+R1 崩溃根因：`copy=0` 时 staging 未分配但 `cpu_gather` 无条件使用（NoneType）。
+修复：`cpu_gather` / `cpu_device_pass` 对本方案份额为空（`numel()==0`）时直接
+返回；新增 stdlib 回归测试 `test_copy_zero_rows_are_empty_everywhere`。
+蓝图仓不需要任何改动，**不需要重新 clone / apply / build**。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题为
+   "R2: 修复 cpu/hybrid 空份额崩溃 + §R1 判读 + §R2 派单"。
+2. 蓝图仓保持 R1 状态：`git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   工作区两个 M 文件仍在；`QUEUE_DEPTH = 8`；`_custom_opp_c8/` 构建产物仍在。
+3. 环境变量无残留（同 §R1 前置核验第 5 条）。
+
+### 执行命令
+
+逐字执行（工作目录任意，脚本自定位；回归结果目录相对 cwd 解析）：
+
+```bash
+cd /home/h2d_test/copy-scheme-bench
+git pull --ff-only && git log --oneline -1
+cd tests && python3 test_scheme_tools.py && cd ..
+# 定点回归：copy=0 在 cpu/hybrid 下必须不再崩溃（4 个 case）
+bash run_scheme_sweep.sh --cards 1 --batch-size 24 --copy-count 0 100 \
+  --schemes cpu hybrid --cpu-fracs 0.5 --iters 200 \
+  --results-dir results/r2_regression
+# 全量主矩阵（60 case；npu 12 坐标兼作跨轮一致性检查）
+bash run_scheme_sweep.sh
+```
+
+### 通过标准
+
+- R2-G1：自检末两行 `Ran 22 tests` / `OK`。
+- R2-G2：回归 manifest `status=="passed"`；4 个 case JSON 全部 passed 且
+  correctness 全 true；`cpu_cards1_bs24_copy0_rf0p0.log` 无 `AttributeError`。
+- R2-G3：主矩阵 manifest `status=="passed"`，`copy_scheme_summary.json`
+  `case_count==60`，每个 case JSON correctness 全 true。
+- R2-G4（跨轮一致性，非验收门槛）：npu 12 坐标与同坐标 R1 值（见 §R1 交付
+  附表）偏差 ≤15%；超出则原样回传并注明，不自行重跑调参。
+
+### 回传格式
+
+同 §R1：AGENTS.md 交付模板 + `copy_scheme_timing_summary.md` 全文 + manifest
+全文 + 回归 4 个 JSON 全文；任何一步失败：日志末 30 行原文，停止后续步骤照常交付。
+
+### 判读预案（派单时写死）
+
+- S1/S2 判据沿用 §R1「判读预案」，逐字不变。
+- R2-G2 失败 ⇒ 修复不完整，蓝区继续修；绿区只回传日志，不改代码。
+- R2-G4 失败 ⇒ 环境漂移：npu 基线跨轮不可比，一切对比以 R2 轮内坐标为准。
+- 补充裁决（由 R1 冒烟信号引出，写死）：若 `cpu` 全坐标 < `npu`，且
+  `phases` 中既非 `cpu_gather_us` 也非 `h2d_scatter_us` 的未归类 host 开销
+  （= avg_us − 两相位之和）占 `avg_us` >30% ⇒ 记 **S1 阴性（host 开销主导）**，
+  下一步是先压 host 开销（减少 launch 次数/图捕获）再复试一次，
+  而不是直接判 CPU 路径死刑。
+
+---
+
+## §R1-旧 派单：A5 首轮主矩阵（2026-10-14，蓝区）
 
 ### 目标
 
@@ -386,3 +452,32 @@ RuntimeError: Workers exited during initialization: [(0, 1)]
   ]
 }
 ```
+
+### 判读（§R1，2026-10-15，蓝区）
+
+对照 §R1「通过标准」与「判读预案」逐条裁决（数据均为绿区**实测值**）：
+
+- G1 ✓ / G2 ✓ / G3 ✓ / G4 ✓：构建、补丁、自检、冒烟全过（绿区实测，冒烟两
+  case 字节级正确性全 true）。冒烟两 case 坐标一致（cards1/bs24/copy100），
+  同轮可比。
+- G5 ✗ ⇒ 按预案「数据缺失 ⇒ 本轮无效」裁决：**R1 主矩阵目标无效**。根因是
+  蓝区脚本缺陷（`cpu_gather`/`cpu_device_pass` 未处理空份额，copy=0 触发
+  NoneType），非被测对象问题；修复与回归开关已随 §R2 下发。
+- 已完成的 12 个 npu case correctness 全 true、冒烟与主矩阵同坐标一致
+  （32.485 vs 32.649 GB/s，偏差 0.5%）、G6 与该机历史曲线同量级
+  ⇒ **npu 基线 12 坐标有效落袋**（实测值）：
+  cards1 32.6/34.1，cards2 65.3/68.0，cards4 88.9/82.0，cards8 178.6/175.0
+  GB/s（copy100/copy300）；copy0 纯 launch 开销 ~11µs。
+- S1/S2 主裁决：**顺延至 R2**（cpu/hybrid 本轮无数据，不裁决）。
+
+观察（事实，非裁决，供 R2 后对照）：
+
+- 多 die 聚合亚线性：1→2 die 线性（32.6→65.3 GB/s），2→4 die 仅 1.36×，
+  单 die 速率从 34 跌至 ~21 GB/s（copy300）⇒ ≥4 die 时共享链路出现竞争
+  （实测值）。这强化了换路径/分流的动机；R2 中 cpu/hybrid 在 cards4/8 的
+  表现是最关键坐标。
+- 冒烟同坐标：cpu 192.4µs vs npu 48.5µs（event）/ 75.6µs（synced 墙钟）。
+  cpu 的 `cpu_gather_us`=47.9µs/2400 行 ≈ 20.0ns/行，与 npu kernel 的
+  20.2ns/行持平；差距在 `h2d_scatter_us`=72.4µs 与未归类 host 开销 ~72µs
+  （占 avg_us 的 37%）（实测值；host 开销为 avg_us 减两相位的**模型反推值**）。
+  ⇒ §R2 判读预案已补充「host 开销主导」分支。

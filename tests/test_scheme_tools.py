@@ -108,6 +108,16 @@ class WorkloadTests(unittest.TestCase):
 
 
 class HybridSplitTests(unittest.TestCase):
+    def test_copy_zero_rows_are_empty_everywhere(self):
+        # R1 regression: cpu/hybrid at copy=0 must see empty shares end to end.
+        counts, src, dst = wl.gen_copy_lists(batch_size=3, source_len=1024, hbm_slots=256,
+                                             copy_min=0, copy_max=0, copy_cap=COPY_CAP_DEFAULT, seed=7)
+        self.assertEqual(counts, [0, 0, 0])
+        self.assertTrue(all(not row for row in src + dst))
+        split = wl.split_hybrid(counts, src, dst, 0.5)
+        self.assertEqual(split["kernel_counts"], [0, 0, 0])
+        self.assertEqual(split["cpu_counts"], [0, 0, 0])
+
     def test_prefix_tail_partition(self):
         counts = [10, 0, 7]
         src = [list(range(10)), [], list(range(100, 107))]
