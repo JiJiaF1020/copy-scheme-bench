@@ -112,7 +112,7 @@ def run_workers(args: argparse.Namespace, devices: list[int]) -> list[dict]:
                     "--warmup", str(args.warmup), "--iters", str(args.iters), "--seed", str(seed),
                     "--scheme", args.scheme, "--run-frac", str(args.run_frac),
                     "--cpu-frac", str(args.cpu_frac), "--hybrid-mode", args.hybrid_mode,
-                    "--cpu-threads", str(args.cpu_threads),
+                    "--cpu-threads", str(args.cpu_threads), "--window", str(args.window),
                     "--json-output", str(result_file), "--ready-file", str(ready_file),
                     "--start-file", str(start_file), "--timing-ready-file", str(timing_ready_file),
                     "--timing-start-file", str(timing_start_file),
@@ -171,7 +171,7 @@ def summarize(args: argparse.Namespace, devices: list[int], per_device: list[dic
             "allow_non_a5": args.allow_non_a5,
             "scheme": args.scheme, "run_frac": args.run_frac, "cpu_frac": args.cpu_frac,
             "hybrid_mode": args.hybrid_mode, "cpu_threads": args.cpu_threads,
-            "pretouch": bool(args.pretouch),
+            "pretouch": bool(args.pretouch), "window": args.window,
             "numa_nodes": os.environ.get(NUMA_ENV, ""),
         },
         "summary": {

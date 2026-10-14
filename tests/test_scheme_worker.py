@@ -73,7 +73,7 @@ class Case:
     cpu_phys_dst: "torch.Tensor | None"
     cpu_phys_dst_npu: "torch.Tensor | None"
     cpu_tokens: int
-    staging: "torch.Tensor | None"    # pinned CPU staging [n, ROW_BYTES]
+    staging: "torch.Tensor | None"    # pinned CPU staging [window, n, ROW_BYTES]
     staging_npu: "torch.Tensor | None"
     staging_pinned: bool
     side_stream: "torch.npu.Stream | None"
@@ -90,6 +90,10 @@ def add_scheme_args(parser: argparse.ArgumentParser) -> None:
                         help="Torch CPU threads for the gather (npu scheme forces 1).")
     parser.add_argument("--pretouch", action="store_true",
                         help="Touch every 4K page of the DRAM mirror and staging buffers before timing.")
+    parser.add_argument("--window", type=int, default=1,
+                        help="cpu/hybrid throughput mode: N iterations share one sync, each with its "
+                             "own staging slot (no per-iteration full-device sync). 1 = per-iteration "
+                             "latency mode (R2 semantics).")
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--json-output", type=Path)
     for name in ("ready-file", "start-file", "timing-ready-file", "timing-start-file"):
@@ -111,6 +115,8 @@ def validate_scheme_args(args: argparse.Namespace) -> None:
         raise ValueError("--cpu-frac must be within [0.0, 1.0].")
     if args.cpu_threads < 1:
         raise ValueError("--cpu-threads must be positive.")
+    if args.window < 1:
+        raise ValueError("--window must be positive.")
 
 
 def _pinned_empty(rows: int) -> tuple["torch.Tensor", bool]:
@@ -185,8 +191,10 @@ def make_case(args: argparse.Namespace) -> Case:
     staging_pinned = False
     stage_tokens = cpu_tokens if args.scheme == "hybrid" else len(phys_src_all)
     if args.scheme in ("cpu", "hybrid") and stage_tokens > 0:
-        staging, staging_pinned = _pinned_empty(stage_tokens)
-        staging_npu = torch.empty((stage_tokens, ROW_BYTES), dtype=torch.int8, device=device)
+        staging, staging_pinned = _pinned_empty(stage_tokens * args.window)
+        staging = staging.view(args.window, stage_tokens, ROW_BYTES)
+        staging_npu = torch.empty((args.window, stage_tokens, ROW_BYTES),
+                                  dtype=torch.int8, device=device)
 
     case = Case(
         device=device, device_name=device_name, dram_cpu=dram_cpu,
@@ -229,26 +237,27 @@ def launch_kernel(case: Case, counts_override=None) -> None:
         case.copy_counts if counts_override is None else counts_override)
 
 
-def cpu_gather(case: Case) -> None:
+def cpu_gather(case: Case, slot: int = 0) -> None:
     """CPU path phase 1: gather rows from the DRAM mirror into pinned staging.
 
     Reads host DRAM directly - no PCIe round trip per row. index_select is
     multithreaded by torch (see --cpu-threads). No-op when this scheme's share
-    is empty (copy=0, or hybrid with cpu_frac rounding to zero).
+    is empty (copy=0, or hybrid with cpu_frac rounding to zero). `slot` selects
+    the per-iteration staging slice in windowed (throughput) mode.
     """
     src = case.cpu_phys_src if case.cpu_phys_src is not None else case.phys_src_all
     if src.numel() == 0:
         return
-    case.staging.copy_(case.dram_flat_cpu.index_select(0, src))
+    case.staging[slot].copy_(case.dram_flat_cpu.index_select(0, src))
 
 
-def cpu_device_pass(case: Case) -> None:
-    """CPU path phase 2: one big H2D of the staging buffer + scatter to dst slots."""
+def cpu_device_pass(case: Case, slot: int = 0) -> None:
+    """CPU path phase 2: one big H2D of the staging slot + scatter to dst slots."""
     dst = case.cpu_phys_dst_npu if case.cpu_phys_dst_npu is not None else case.phys_dst_all_npu
     if dst.numel() == 0:
         return
-    case.staging_npu.copy_(case.staging, non_blocking=True)
-    case.hbm_flat.index_copy_(0, dst, case.staging_npu)
+    case.staging_npu[slot].copy_(case.staging[slot], non_blocking=True)
+    case.hbm_flat.index_copy_(0, dst, case.staging_npu[slot])
 
 
 def cpu_full_pass(case: Case) -> None:
@@ -391,21 +400,31 @@ def time_cpu(case: Case, args: argparse.Namespace) -> dict:
     end = torch.npu.Event(enable_timing=True)
     gather_us = device_wall_us = device_event_us = 0.0
     total_us = []
-    for _ in range(args.iters):
+    done = 0
+    while done < args.iters:
+        # Windowed throughput mode: each iteration gets its own staging slot, so
+        # the host can run ahead launching H2D+scatter for the whole window and
+        # pay one sync per window instead of one per iteration. window==1
+        # reduces to the per-iteration latency semantics of R2 exactly.
+        w = min(args.window, args.iters - done)
         t0 = time.perf_counter_ns()
-        cpu_gather(case)
+        for slot in range(w):
+            cpu_gather(case, slot)
         t1 = time.perf_counter_ns()
         start.record()
-        cpu_device_pass(case)
+        for slot in range(w):
+            cpu_device_pass(case, slot)
         end.record()
         torch.npu.synchronize()
         t2 = time.perf_counter_ns()
         gather_us += (t1 - t0) / 1000.0
         device_wall_us += (t2 - t1) / 1000.0
         device_event_us += start.elapsed_time(end) * 1000
-        total_us.append((t2 - t0) / 1000.0)
+        total_us.extend([(t2 - t0) / 1000.0 / w] * w)
+        done += w
     return {"timer": "perf_counter", "avg_us": sum(total_us) / len(total_us),
             "avg_us_host_synced": None, "latency_us": _quantiles(total_us),
+            "window": args.window,
             "phases": {"cpu_gather_us": gather_us / args.iters,
                        "device_wall_us": device_wall_us / args.iters,
                        "device_event_us": device_event_us / args.iters,
@@ -422,36 +441,42 @@ def time_hybrid(case: Case, args: argparse.Namespace) -> dict:
     end = torch.npu.Event(enable_timing=True)
     first_us = tail_us = kernel_event_us = 0.0
     total_us = []
-    for _ in range(args.iters):
+    done = 0
+    while done < args.iters:
+        w = min(args.window, args.iters - done)
         t0 = time.perf_counter_ns()
         if serial:
             start.record()
-            launch_kernel(case)
+            for _ in range(w):
+                launch_kernel(case)
             end.record()
-            torch.npu.synchronize()
-            t1 = time.perf_counter_ns()
-            cpu_gather(case)
-            cpu_device_pass(case)
+            t1 = time.perf_counter_ns()  # kernels launched (async), cpu part starts
+            for slot in range(w):
+                cpu_gather(case, slot)
+                cpu_device_pass(case, slot)
             torch.npu.synchronize()
             t2 = time.perf_counter_ns()
         else:
             start.record()
-            launch_kernel(case)
-            cpu_gather(case)
+            for slot in range(w):
+                launch_kernel(case)
+                cpu_gather(case, slot)
+                with torch.npu.stream(case.side_stream):
+                    cpu_device_pass(case, slot)
             t1 = time.perf_counter_ns()
-            with torch.npu.stream(case.side_stream):
-                cpu_device_pass(case)
             end.record()
             torch.npu.synchronize()
             t2 = time.perf_counter_ns()
         first_us += (t1 - t0) / 1000.0
         tail_us += (t2 - t1) / 1000.0
         kernel_event_us += start.elapsed_time(end) * 1000
-        total_us.append((t2 - t0) / 1000.0)
+        total_us.extend([(t2 - t0) / 1000.0 / w] * w)
+        done += w
     first_phase = "kernel_wall_us" if serial else "launch_to_gather_done_us"
     tail_phase = "cpu_part_us" if serial else "h2d_scatter_tail_us"
     return {"timer": "perf_counter", "avg_us": sum(total_us) / len(total_us),
             "avg_us_host_synced": None, "latency_us": _quantiles(total_us),
+            "window": args.window,
             "phases": {first_phase: first_us / args.iters,
                        tail_phase: tail_us / args.iters,
                        "kernel_event_us": kernel_event_us / args.iters}}
@@ -478,6 +503,7 @@ def run(args: argparse.Namespace) -> dict:
           f"scheme={args.scheme} run_frac={args.run_frac} cpu_frac={args.cpu_frac} "
           f"hybrid_mode={args.hybrid_mode} cpu_threads={args.cpu_threads} "
           f"pretouch={args.pretouch} staging_pinned={case.staging_pinned} "
+          f"window={args.window} "
           f"batch={args.batch_size} copy_range=[{args.copy_min},{args.copy_max}] "
           f"copied_tokens={copied_tokens} cpu_tokens={case.cpu_tokens} "
           f"queue_depth={os.environ.get(QUEUE_DEPTH_ENV, DEFAULT_QUEUE_DEPTH)}", flush=True)
@@ -518,6 +544,7 @@ def run(args: argparse.Namespace) -> dict:
             "scheme": args.scheme, "run_frac": args.run_frac, "cpu_frac": args.cpu_frac,
             "hybrid_mode": args.hybrid_mode, "cpu_threads": args.cpu_threads,
             "pretouch": bool(args.pretouch), "staging_pinned": case.staging_pinned,
+            "window": args.window,
             "queue_depth": int(os.environ.get(QUEUE_DEPTH_ENV, DEFAULT_QUEUE_DEPTH)),
         },
         "workload": {

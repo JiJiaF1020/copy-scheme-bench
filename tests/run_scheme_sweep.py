@@ -67,6 +67,8 @@ def parse_args(argv=None):
     parser.add_argument("--numa-nodes", default=os.getenv("NUMA_NODES", ""),
                         help='Space/comma-separated node ids, e.g. "0 1 2 3"; when set, every case runs twice (unbound and bound).')
     parser.add_argument("--pretouch", action="store_true", default=os.getenv("PRETOUCH") == "1")
+    parser.add_argument("--window", type=int, default=int(os.getenv("WINDOW", "1")),
+                        help="cpu/hybrid iterations per sync window; environment: WINDOW.")
     parser.add_argument("--results-dir", type=Path, default=Path(os.getenv("RESULTS_DIR", str(ROOT / RESULTS_SUBDIR))))
     parser.add_argument("--dry-run", action="store_true", default=os.getenv("DRY_RUN") == "1",
                         help="Validate and print commands without importing Torch, loading CANN or starting NPUs.")
@@ -100,6 +102,8 @@ def parse_args(argv=None):
         raise ValueError("NUMA sweep needs at least as many node ids as the largest --cards value.")
     if os.getenv("DTYPES", DTYPE).split() != [DTYPE]:
         raise ValueError(f"The scheme sweep uses {DTYPE}; DTYPES must be {DTYPE} if set.")
+    if args.window < 1:
+        raise ValueError("--window must be positive.")
     for batch in args.batch_size:
         for count in args.copy_count:
             validate_workload(argparse.Namespace(**{**vars(args), "batch_size": batch,
@@ -148,6 +152,8 @@ def cases(args):
                                         command += ["--cpu-frac", str(cpu_frac), "--hybrid-mode", hybrid_mode]
                                     if args.pretouch:
                                         command.append("--pretouch")
+                                    if args.window != 1:
+                                        command += ["--window", str(args.window)]
                                     env_extra = {}
                                     if numa:
                                         env_extra[NUMA_ENV] = ",".join(str(node) for node in args.numa_nodes[:cards])

@@ -371,6 +371,28 @@ class SweepCliTests(unittest.TestCase):
         self.assertEqual(len(planned), 3)
         self.assertEqual([name.rsplit("_r", 1)[1] for name, _, _, _ in planned], ["1", "2", "3"])
 
+    def test_window_forwarding_and_validation(self):
+        with patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1"}, clear=True):
+            args = run_scheme_sweep.parse_args(
+                ["--cards", "1", "--batch-size", "3", "--copy-count", "7",
+                 "--schemes", "cpu", "--window", "16"])
+            planned = list(run_scheme_sweep.cases(args))
+            self.assertEqual(len(planned), 1)
+            command = planned[0][2]
+            self.assertEqual(command[command.index("--window") + 1], "16")
+            args = run_scheme_sweep.parse_args(
+                ["--cards", "1", "--batch-size", "3", "--copy-count", "7", "--schemes", "cpu"])
+            self.assertNotIn("--window", list(run_scheme_sweep.cases(args))[0][2])
+            with self.assertRaises(ValueError):
+                run_scheme_sweep.parse_args(
+                    ["--cards", "1", "--batch-size", "3", "--copy-count", "7", "--window", "0"])
+        args = test_scheme_worker.parse_args(["--scheme", "cpu", "--window", "16"])
+        self.assertEqual(args.window, 16)
+        test_scheme_worker.validate_scheme_args(args)
+        with self.assertRaises(ValueError):
+            test_scheme_worker.validate_scheme_args(
+                test_scheme_worker.parse_args(["--scheme", "cpu", "--window", "0"]))
+
     def test_dry_run_prints_without_touching_results_dir(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1"}, clear=True):
