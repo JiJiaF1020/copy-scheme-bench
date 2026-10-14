@@ -101,6 +101,301 @@ cards1 copy100 的 w1/w16 各一，看 phases 用）。
 - 任何 case correctness 失败 ⇒ 该 case 无效；窗口化破坏正确性（如
   assert_copied 失败集中出现在 w16）⇒ 窗口实现有竞态，蓝区修复后重派。
 
+### 交付（§R3，2026-10-15，绿区）
+
+**执行环境**：机器 work21（141.61.33.21）openEuler aarch64；8× Ascend950DT_9572（可见设备 0-7）；宿主 root；CANN 9.2.0（/usr/local/Ascend/ascend-toolkit/latest）；时间 2026-10-14T17:56:27Z–18:18:29Z（A w1 17:56:27–18:06:14Z、B w16 18:06:14–18:15:57Z、C npu 锚点 18:15:57–18:18:29Z）。
+**前置核验**：逐条实际值——
+1. 本仓 `git log --oneline -1` = `0bb950d R3: §R3 派单（host 压减复试 window 1 vs 16）+ drafts 状态更新` ✓
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2` ✓；`QUEUE_DEPTH = 8` 计数 1 ✓；`_custom_opp_c8/` 构建产物仍在 ✓；**未重编**（派单注明不需要）✓
+3. 环境变量无残留：ASCEND_CUSTOM_OPP_PATH/PYTHONPATH/ASCEND_AICPU_PATH 空，LD_LIBRARY_PATH 仅 driver 基础路径 ✓
+**执行**：命令逐字执行，无偏差。自检 `test_scheme_tools.py` 38 tests OK；A `--window` 缺省=1（w1 轮内基线）48 case；B `--window 16`（w16 吞吐模式）48 case；C npu 锚点 12 case；均 `--repeat 2` iters=1000 默认。三组 manifest 全 passed。
+**通过标准命中**：
+- R3-G1 ✓：`Ran 38 tests` / `OK`，RC=0。
+- R3-G2 ✓：三个 manifest（w1/w16/anchor）全 `status=="passed"`；108 case JSON 全 passed、correctness 全 true（脚本逐 case 核验，bad=0）；window 分档正确——w1 目录 48×window=1、w16 目录 48×window=16、anchor 12×window=1（防串组）✓。
+- R3-G3 ✓（跨轮一致性，非门槛）：w1 cpu/hybrid 24 坐标 vs §R2 交付 summary 同坐标（cf0.5）偏差最大 14.77%（hybrid cards8 copy100），全部 ≤15%，未触发超限。逐坐标偏差见下表（观察节）。
+**原始数据**：
+
+`results/r3/w1/copy_scheme_timing_summary.md` 全文：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 0 | 69.195 | 69.195 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 100 | 191.005 | 191.005 | 8.262 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 300 | 272.334 | 272.334 | 17.344 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 0 | 74.827 | 77.288 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 100 | 205.370 | 208.145 | 15.335 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 300 | 303.942 | 305.154 | 31.102 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 0 | 92.351 | 99.582 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 100 | 246.993 | 267.213 | 25.744 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 300 | 361.316 | 371.806 | 52.872 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 0 | 114.162 | 134.178 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 100 | 236.409 | 248.794 | 53.384 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 356.267 | 382.240 | 106.944 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 0 | 111.906 | 111.906 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 100 | 263.792 | 263.792 | 5.969 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 300 | 277.943 | 277.943 | 17.001 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 0 | 117.609 | 119.623 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 100 | 271.237 | 285.175 | 11.668 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 300 | 317.671 | 326.270 | 29.776 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 0 | 121.440 | 125.782 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 100 | 296.753 | 314.578 | 21.280 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 300 | 399.800 | 422.604 | 47.729 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 0 | 145.630 | 164.356 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 100 | 302.638 | 349.403 | 41.914 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 300 | 419.553 | 453.436 | 90.441 |
+```
+
+`results/r3/w16/copy_scheme_timing_summary.md` 全文：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 0 | 5.053 | 5.053 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 100 | 89.672 | 89.672 | 17.576 |
+| cpu | 0 | 0.5 | overlap | 1 | 24 | 300 | 202.924 | 202.924 | 23.326 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 0 | 5.216 | 5.330 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 100 | 99.417 | 107.567 | 31.948 |
+| cpu | 0 | 0.5 | overlap | 2 | 24 | 300 | 199.888 | 200.237 | 47.259 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 0 | 5.941 | 6.626 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 100 | 123.758 | 137.662 | 51.195 |
+| cpu | 0 | 0.5 | overlap | 4 | 24 | 300 | 290.081 | 324.430 | 67.380 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 0 | 6.561 | 7.084 | 0.000 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 100 | 92.090 | 108.910 | 138.021 |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 263.169 | 297.314 | 151.735 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 0 | 32.354 | 32.354 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 100 | 162.861 | 162.861 | 9.668 |
+| hybrid | 0 | 0.5 | overlap | 1 | 24 | 300 | 177.072 | 177.072 | 26.674 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 0 | 33.604 | 34.679 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 100 | 168.225 | 170.275 | 18.721 |
+| hybrid | 0 | 0.5 | overlap | 2 | 24 | 300 | 246.809 | 260.858 | 38.478 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 0 | 37.337 | 48.561 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 100 | 193.934 | 198.821 | 32.485 |
+| hybrid | 0 | 0.5 | overlap | 4 | 24 | 300 | 359.362 | 377.229 | 52.657 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 0 | 34.972 | 36.379 | 0.000 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 100 | 162.180 | 175.098 | 77.846 |
+| hybrid | 0 | 0.5 | overlap | 8 | 24 | 300 | 275.195 | 319.800 | 144.464 |
+```
+
+`results/r3/anchor/copy_scheme_timing_summary.md` 全文：
+
+```
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| npu | 0 | 0.5 | overlap | 1 | 24 | 0 | 11.007 | 11.007 | 0.000 |
+| npu | 0 | 0.5 | overlap | 1 | 24 | 300 | 138.970 | 138.970 | 33.987 |
+| npu | 0 | 0.5 | overlap | 4 | 24 | 0 | 11.033 | 11.468 | 0.000 |
+| npu | 0 | 0.5 | overlap | 4 | 24 | 300 | 256.536 | 278.526 | 76.696 |
+| npu | 0 | 0.5 | overlap | 8 | 24 | 0 | 11.574 | 16.890 | 0.000 |
+| npu | 0 | 0.5 | overlap | 8 | 24 | 300 | 222.595 | 238.419 | 170.740 |
+```
+
+三目录 `copy_scheme_run_manifest.json` 全文：
+
+```json
+w1: {"schema_version":2,"status":"passed","dtype":"c8","timestamp_utc":"2026-10-14T17:56:27.697103+00:00","visible_devices":"0,1,2,3,4,5,6,7","queue_depth":"default","case_files":[<48 files: cpu/hybrid × cards1,2,4,8 × copy0,100,300 × _r1,_r2>]}
+w16: {"schema_version":2,"status":"passed","dtype":"c8","timestamp_utc":"2026-10-14T18:06:14.246201+00:00","visible_devices":"0,1,2,3,4,5,6,7","queue_depth":"default","case_files":[<48 files: 同 w1 命名>]}
+anchor: {"schema_version":2,"status":"passed","dtype":"c8","timestamp_utc":"2026-10-14T18:15:57.596503+00:00","visible_devices":"0,1,2,3,4,5,6,7","queue_depth":"default","case_files":[<12 files: npu × cards1,4,8 × copy0,300 × _r1,_r2>]}
+```
+
+（manifest case_files 完整 48/48/12 清单见仓库 `results/r3/{w1,w16,anchor}/copy_scheme_run_manifest.json`，gitignore 不入库；文件名模式：w1/w16 为 `{cpu,hybrid}_cards{c}_bs24_copy{k}_rf0p0[_cf0p5_overlap]_r{r}.json`，anchor 为 `npu_cards{c}_bs24_copy{k}_rf0p0_r{r}.json`。）
+
+4 个 case JSON 全文（看 phases 用）：
+
+`results/r3/w1/cpu_cards1_bs24_copy100_rf0p0_r1.json`：
+
+```json
+{
+  "schema_version": 2, "test": "a5_kvcache_copy_scheme_multiprocess", "status": "passed",
+  "timestamp_utc": "2026-10-14T17:56:58.129522+00:00", "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1, "devices": [0], "same_seed": true,
+  "config": {
+    "dtype": "c8", "row_bytes": 656, "batch_size": 24, "source_len": 65536, "hbm_slots": 8192,
+    "copy_min": 100, "copy_max": 100, "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7,
+    "allow_non_a5": false, "scheme": "cpu", "run_frac": 0.0, "cpu_frac": 0.5, "hybrid_mode": "overlap",
+    "cpu_threads": 8, "pretouch": false, "window": 1, "numa_nodes": ""
+  },
+  "summary": {"avg_us_mean": 181.7163899999999, "avg_us_max": 181.7163899999999,
+    "avg_bandwidth": 8.664050612055417, "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400, "all_correct": true},
+  "per_device": [
+    {
+      "schema_version": 2, "test": "a5_kvcache_copy_scheme_singlecard", "status": "passed",
+      "timestamp_utc": "2026-10-14T17:56:55.335847+00:00", "device_count": 1,
+      "config": {
+        "device": "npu:0", "device_name": "Ascend950DT_9572", "dtype": "c8", "row_bytes": 656,
+        "batch_size": 24, "source_len": 65536, "hbm_slots": 8192, "copy_min": 100, "copy_max": 100,
+        "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7, "scheme": "cpu", "run_frac": 0.0,
+        "cpu_frac": 0.5, "hybrid_mode": "overlap", "cpu_threads": 8, "pretouch": false,
+        "staging_pinned": true, "window": 1, "queue_depth": 8
+      },
+      "workload": {"copy_counts": [100×24], "copied_tokens": 2400, "cpu_tokens": 0,
+        "payload_bytes_per_iteration": 1574400},
+      "correctness": {"data_exact": true, "guard_unchanged": true},
+      "summary": {"cards": 1, "batch_size": 24, "copy_count": 100,
+        "avg_us_mean": 181.7163899999999, "avg_us_max": 181.7163899999999,
+        "avg_bandwidth": 8.664050612055417},
+      "performance": {"timer": "perf_counter", "avg_us": 181.7163899999999, "avg_us_host_synced": null,
+        "latency_us": {"mean": 181.7163899999999, "p50": 179.45, "p90": 196.57, "p99": 229.67,
+          "min": 154.38, "max": 647.53, "n": 1000},
+        "window": 1,
+        "phases": {"cpu_gather_us": 46.09559999999996, "device_wall_us": 135.6207900000002,
+          "device_event_us": 76.81902299076319, "device_overhead_us": 58.801767009237025}},
+      "rank": 0, "logical_device_index": 0
+    }
+  ]
+}
+```
+
+`results/r3/w16/cpu_cards1_bs24_copy100_rf0p0_r1.json`：
+
+```json
+{
+  "schema_version": 2, "test": "a5_kvcache_copy_scheme_multiprocess", "status": "passed",
+  "timestamp_utc": "2026-10-14T18:06:47.565361+00:00", "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1, "devices": [0], "same_seed": true,
+  "config": {
+    "dtype": "c8", "row_bytes": 656, "batch_size": 24, "source_len": 65536, "hbm_slots": 8192,
+    "copy_min": 100, "copy_max": 100, "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7,
+    "allow_non_a5": false, "scheme": "cpu", "run_frac": 0.0, "cpu_frac": 0.5, "hybrid_mode": "overlap",
+    "cpu_threads": 8, "pretouch": false, "window": 16, "numa_nodes": ""
+  },
+  "summary": {"avg_us_mean": 86.71812000000014, "avg_us_max": 86.71812000000014,
+    "avg_bandwidth": 18.155375139590173, "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400, "all_correct": true},
+  "per_device": [
+    {
+      "schema_version": 2, "test": "a5_kvcache_copy_scheme_singlecard", "status": "passed",
+      "timestamp_utc": "2026-10-14T18:06:44.721865+00:00", "device_count": 1,
+      "config": {
+        "device": "npu:0", "device_name": "Ascend950DT_9572", "dtype": "c8", "row_bytes": 656,
+        "batch_size": 24, "source_len": 65536, "hbm_slots": 8192, "copy_min": 100, "copy_max": 100,
+        "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7, "scheme": "cpu", "run_frac": 0.0,
+        "cpu_frac": 0.5, "hybrid_mode": "overlap", "cpu_threads": 8, "pretouch": false,
+        "staging_pinned": true, "window": 16, "queue_depth": 8
+      },
+      "workload": {"copy_counts": [100×24], "copied_tokens": 2400, "cpu_tokens": 0,
+        "payload_bytes_per_iteration": 1574400},
+      "correctness": {"data_exact": true, "guard_unchanged": true},
+      "summary": {"cards": 1, "batch_size": 24, "copy_count": 100,
+        "avg_us_mean": 86.71812000000014, "avg_us_max": 86.71812000000014,
+        "avg_bandwidth": 18.155375139590173},
+      "performance": {"timer": "perf_counter", "avg_us": 86.71812000000014, "avg_us_host_synced": null,
+        "latency_us": {"mean": 86.71811999999981, "p50": 86.75125, "p90": 91.89875, "p99": 135.565,
+          "min": 78.430625, "max": 135.565, "n": 1000},
+        "window": 16,
+        "phases": {"cpu_gather_us": 28.264360000000003, "device_wall_us": 58.45375999999999,
+          "device_event_us": 52.43560868501663, "device_overhead_us": 6.018151314983355}},
+      "rank": 0, "logical_device_index": 0
+    }
+  ]
+}
+```
+
+`results/r3/w1/hybrid_cards1_bs24_copy100_rf0p0_cf0p5_overlap_r1.json`：
+
+```json
+{
+  "schema_version": 2, "test": "a5_kvcache_copy_scheme_multiprocess", "status": "passed",
+  "timestamp_utc": "2026-10-14T18:01:44.560236+00:00", "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1, "devices": [0], "same_seed": true,
+  "config": {
+    "dtype": "c8", "row_bytes": 656, "batch_size": 24, "source_len": 65536, "hbm_slots": 8192,
+    "copy_min": 100, "copy_max": 100, "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7,
+    "allow_non_a5": false, "scheme": "hybrid", "run_frac": 0.0, "cpu_frac": 0.5, "hybrid_mode": "overlap",
+    "cpu_threads": 8, "pretouch": false, "window": 1, "numa_nodes": ""
+  },
+  "summary": {"avg_us_mean": 266.2583300000001, "avg_us_max": 266.2583300000001,
+    "avg_bandwidth": 5.913054438522164, "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400, "all_correct": true},
+  "per_device": [
+    {
+      "schema_version": 2, "test": "a5_kvcache_copy_scheme_singlecard", "status": "passed",
+      "timestamp_utc": "2026-10-14T18:01:41.553346+00:00", "device_count": 1,
+      "config": {
+        "device": "npu:0", "device_name": "Ascend950DT_9572", "dtype": "c8", "row_bytes": 656,
+        "batch_size": 24, "source_len": 65536, "hbm_slots": 8192, "copy_min": 100, "copy_max": 100,
+        "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7, "scheme": "hybrid", "run_frac": 0.0,
+        "cpu_frac": 0.5, "hybrid_mode": "overlap", "cpu_threads": 8, "pretouch": false,
+        "staging_pinned": true, "window": 1, "queue_depth": 8
+      },
+      "workload": {"copy_counts": [100×24], "copied_tokens": 2400, "cpu_tokens": 1200,
+        "payload_bytes_per_iteration": 1574400},
+      "correctness": {"data_exact": true, "guard_unchanged": true, "zero_count_unchanged": true,
+        "first_fill_capacity": true, "metadata_unchanged": true},
+      "summary": {"cards": 1, "batch_size": 24, "copy_count": 100,
+        "avg_us_mean": 266.2583300000001, "avg_us_max": 266.2583300000001,
+        "avg_bandwidth": 5.913054438522164},
+      "performance": {"timer": "perf_counter", "avg_us": 266.2583300000001, "avg_us_host_synced": null,
+        "latency_us": {"mean": 266.2583300000002, "p50": 264.44, "p90": 280.36, "p99": 311.09,
+          "min": 220.4, "max": 683.04, "n": 1000},
+        "window": 1,
+        "phases": {"launch_to_gather_done_us": 183.00110999999995, "h2d_scatter_tail_us": 83.25722000000016,
+          "kernel_event_us": 182.72431115806103}},
+      "rank": 0, "logical_device_index": 0
+    }
+  ]
+}
+```
+
+`results/r3/w16/hybrid_cards1_bs24_copy100_rf0p0_cf0p5_overlap_r1.json`：
+
+```json
+{
+  "schema_version": 2, "test": "a5_kvcache_copy_scheme_multiprocess", "status": "passed",
+  "timestamp_utc": "2026-10-14T18:11:31.452317+00:00", "visible_devices": "0,1,2,3,4,5,6,7",
+  "device_count": 1, "devices": [0], "same_seed": true,
+  "config": {
+    "dtype": "c8", "row_bytes": 656, "batch_size": 24, "source_len": 65536, "hbm_slots": 8192,
+    "copy_min": 100, "copy_max": 100, "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7,
+    "allow_non_a5": false, "scheme": "hybrid", "run_frac": 0.0, "cpu_frac": 0.5, "hybrid_mode": "overlap",
+    "cpu_threads": 8, "pretouch": false, "window": 16, "numa_nodes": ""
+  },
+  "summary": {"avg_us_mean": 161.67691999999928, "avg_us_max": 161.67691999999928,
+    "avg_bandwidth": 9.737939094831884, "total_payload_bytes_per_iteration": 1574400,
+    "copied_tokens_sum_per_iteration": 2400, "all_correct": true},
+  "per_device": [
+    {
+      "schema_version": 2, "test": "a5_kvcache_copy_scheme_singlecard", "status": "passed",
+      "timestamp_utc": "2026-10-14T18:11:28.333248+00:00", "device_count": 1,
+      "config": {
+        "device": "npu:0", "device_name": "Ascend950DT_9572", "dtype": "c8", "row_bytes": 656,
+        "batch_size": 24, "source_len": 65536, "hbm_slots": 8192, "copy_min": 100, "copy_max": 100,
+        "copy_cap": 16384, "warmup": 10, "iters": 1000, "seed": 7, "scheme": "hybrid", "run_frac": 0.0,
+        "cpu_frac": 0.5, "hybrid_mode": "overlap", "cpu_threads": 8, "pretouch": false,
+        "staging_pinned": true, "window": 16, "queue_depth": 8
+      },
+      "workload": {"copy_counts": [100×24], "copied_tokens": 2400, "cpu_tokens": 1200,
+        "payload_bytes_per_iteration": 1574400},
+      "correctness": {"data_exact": true, "guard_unchanged": true, "zero_count_unchanged": true,
+        "first_fill_capacity": true, "metadata_unchanged": true},
+      "summary": {"cards": 1, "batch_size": 24, "copy_count": 100,
+        "avg_us_mean": 161.67691999999928, "avg_us_max": 161.67691999999928,
+        "avg_bandwidth": 9.737939094831884},
+      "performance": {"timer": "perf_counter", "avg_us": 161.67691999999928, "avg_us_host_synced": null,
+        "latency_us": {"mean": 161.67691999999892, "p50": 160.945625, "p90": 165.375625, "p99": 194.01625,
+          "min": 153.176875, "max": 194.01625, "n": 1000},
+        "window": 16,
+        "phases": {"launch_to_gather_done_us": 156.25639999999999, "h2d_scatter_tail_us": 5.420520000000001,
+          "kernel_event_us": 156.0201358795166}},
+      "rank": 0, "logical_device_index": 0
+    }
+  ]
+}
+```
+
+**结果文件**：宿主机 21 `/home/h2d_test/copy-scheme-bench/results/r3/{w1,w16,anchor}/`（各含 48/48/12 case JSON + manifest + summary + timing_summary.csv/md + 逐 case .log）；`results/` gitignore 未提交入库。
+**观察**（只事实、不结论）：
+- 主键对比（同坐标 avg_us_mean/带宽，repeat 折叠值，均 cards1/bs24/copy100 起算）：
+  - cpu w1→w16：copy100 181.716→86.718µs（8.664→18.155 GB/s）；copy300 272.334→202.924µs（17.344→23.326 GB/s）；copy0 69.195→5.053µs。
+  - cpu w16 带宽全坐标 > w1（cards8 copy100 53.384→138.021、copy300 106.944→151.735 GB/s）。
+  - hybrid w1→w16：copy100 263.792→162.861µs（5.969→9.668 GB/s）；copy300 277.943→177.072µs（17.001→26.674 GB/s）；copy0 111.906→32.354µs。
+- phases（cpu copy100 cards1，看 host 开销口径）：w1 cpu_gather 46.096µs + device_wall 135.621µs（其中 device_event 76.819、device_overhead 58.802）；w16 cpu_gather 28.264µs + device_wall 58.454µs（device_event 52.436、device_overhead 6.018）。未归类 host 开销（= avg_us − cpu_gather − device_wall）：w1 ≈ 0.000µs（0.0%）、w16 ≈ 0.000µs（0.0%）。
+- hybrid phases（copy100 cards1）：w1 launch_to_gather_done 183.001µs + h2d_scatter_tail 83.257µs；w16 156.256µs + 5.421µs。
+- R3-G3 逐坐标偏差（w1 vs §R2 cf0.5，%）：cpu cards1 -3.60/0.17/4.71、cards2 0.79/-2.75/11.18、cards4 8.28/13.42/5.17、cards8 -4.73/-1.28/3.30（copy0/100/300）；hybrid cards1 0.01/8.45/2.11、cards2 -2.57/6.77/-7.75、cards4 -1.69/-3.49/-5.77、cards8 -4.77/14.77/5.24。最大 14.77%。
+- npu 锚点（同轮）：copy300 cards1 33.987/cards4 76.696/cards8 170.740 GB/s；copy0 11.0-11.6µs。
+**异常**：无。
+
 ---
 
 ## §R2-旧 派单：修复后重跑主矩阵（2026-10-15，蓝区）
