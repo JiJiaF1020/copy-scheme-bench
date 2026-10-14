@@ -22,7 +22,7 @@ B) w16 吞吐模式 48 case、C) npu 锚点 12 case（cpu/hybrid×cards1248×
 copy{0,100,300}×repeat2，npu×cards148×copy{0,300}×repeat2，共 108）。
 通过标准 R3-G1..G3 与判读预案（host 压减有效性 / S1 翻正 / S2 重开 /
 cpu 判死转集合层）见 pingpong.md §R3。
-**交付**：待绿区回传。
+**交付**（commit 本轮 push 后回填）：R3-G1 自检 38 tests OK；R3-G2 三 manifest（w1/w16/anchor）全 passed、108 case 全 passed 且 correctness 全 true、window 分档正确（w1=48×1、w16=48×16、anchor=12×1）；R3-G3 w1 cpu/hybrid 24 坐标 vs §R2 同坐标（cf0.5）偏差最大 14.77%（hybrid cards8 copy100），全部 ≤15%。主键实测：cpu copy100 cards1 181.716→86.718µs（w1→w16，8.66→18.16 GB/s）、copy300 cards8 106.94→151.74 GB/s；hybrid copy100 cards1 263.792→162.861µs（5.97→9.67 GB/s）、copy300 cards8 90.44→144.46 GB/s；cpu copy0 cards1 69.195→5.053µs。npu 锚点 copy300 cards1/4/8=33.99/76.70/170.74 GB/s。phases（cpu copy100 cards1）：w1 cpu_gather 46.096 + device_wall 135.621（event 76.819/overhead 58.802）；w16 28.264 + 58.454（event 52.436/overhead 6.018）。数据出处：results/r3/{w1,w16,anchor}/（gitignore 不入库）。
 **判读**：待交付后蓝区填写。
 
 ## §R1 A5 首轮主矩阵：npu vs cpu vs hybrid（2026-10-14）
