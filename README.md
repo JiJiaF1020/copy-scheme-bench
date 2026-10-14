@@ -31,15 +31,21 @@ S1/S2 是逐迭代串行延迟——两者都给出，判读时先说口径再�
 copy-scheme-bench/
 ├── run_scheme_sweep.sh          # A5 入口：source CANN + 调用 sweep
 ├── tools/build_queue_depth.sh   # S4：改 QUEUE_DEPTH 重编蓝图 kernel
+├── tools/churn_analysis.py      # 集合层：top-K trace 的 ρ/LRU 驻留/block 统计
+├── tools/churn_synth.py         # 集合层：合成 top-K trace 生成器（ρ/热池/相变/层数）
+├── tools/breakeven.py           # 盈亏模型：T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
+├── drafts/                      # 蓝区工作底稿（派单草稿、模型预览；非绿区任务面）
 └── tests/
     ├── _bootstrap.py            # 定位蓝图仓（SCATTER_ROOT），复用其六列口径
     ├── scheme_config.py         # 测试名/方案名/环境变量名
     ├── scheme_workload.py       # 纯 stdlib：负载生成(run-frac)、物理行解析、参考 gather、hybrid 切分
-    ├── scheme_report.py         # 带 scheme 列的归一化与汇总（数学复用蓝图 scatter_results）
-    ├── test_scheme_worker.py    # 单卡 worker：npu/cpu/hybrid 三方案（torch 延迟导入）
+    ├── scheme_churn.py          # 纯 stdlib：trace 解析、相邻步重叠、LRU 驻留模拟
+    ├── scheme_churn_synth.py    # 纯 stdlib：合成 trace（几何漂移 + 相变跳区 + 多层）
+    ├── scheme_report.py         # 带 scheme 列的归一化与汇总；重复坐标折叠（mean + n_runs + std）
+    ├── test_scheme_worker.py    # 单卡 worker：npu/cpu/hybrid 三方案，迭代级分位数（torch 延迟导入）
     ├── run_scheme_multiprocess.py  # 多 die runner：两阶段文件握手，NUMA 绑定
-    ├── run_scheme_sweep.py      # 矩阵 sweep：dry-run 免 NPU
-    └── test_scheme_tools.py     # macOS 自检（21 项，无 torch 依赖）
+    ├── run_scheme_sweep.py      # 矩阵 sweep：dry-run 免 NPU；--repeat N 做 run 级波动控制
+    └── test_scheme_tools.py     # macOS 自检（36 项，无 torch 依赖）
 ```
 
 口径单一来源：六列数学、`validate_workload`、常量全部 import 自蓝图仓
@@ -106,13 +112,27 @@ copy-scheme-bench/tools/build_queue_depth.sh 8   # 用完恢复
 | 观察 | 结论 |
 | --- | --- |
 | S1(cpu) 端到端 ≥ S0(npu) | 瓶颈在"每行一次 PCIe 小包往返"，kernel 微优化（S4）空间也有限 |
-| S1 的 `cpu_gather_us` 占比极小、`h2d_scatter_us` 接近理论 H2D 带宽 | CPU gather 假设成立，值得往 vLLM 侧集成 |
+| S1 的 `cpu_gather_us` 占比极小、`device_wall_us` 接近理论 H2D 带宽 | CPU gather 假设成立，值得往 vLLM 侧集成 |
 | S1 gather 慢 | CPU 侧是瓶颈：加 `--cpu-threads`、开 S5 NUMA、开 S6 pretouch 再测 |
 | S2 overlap < 两条路径各自的串行时间之和 | 两条 PCIe 路径能并发，生产上按负载动态分流 |
 | S3 run_frac 越高带宽越陡 | 性能对局部性敏感；若业务真有局部性（连续段），值得在模式层聚合 |
 | S3 曲线平 | 纯 PCIe 小包延迟受限，聚合也没用，方向只剩换路径（S1/S2） |
 | S4 depth 16 明显快于 8 | MTE2 在飞读数是瓶颈，kernel 还有一段免费空间 |
 | S5 绑定后 CPU 路径变快 | 生产部署必须做 NUMA 绑定 |
+
+## 集合层分析（驻留+增量方向）
+
+搬运路径之外的第二个方向：top-K 集合相邻步重叠 ρ 高时，每步只搬差集。
+本仓自带纯 stdlib 工具链（无 NPU 依赖）：
+
+```bash
+python3 tools/churn_synth.py --steps 500 --k 2048 --keep 0.85 --out trace.jsonl  # 或真实 indexer dump（同格式 jsonl）
+python3 tools/churn_analysis.py trace.jsonl        # ρ、LRU 驻留命中率、block 碎片度
+python3 tools/breakeven.py results/copy_scheme_a5_c8  # T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
+```
+
+演示与结论见 `drafts/churn_synth_demo.md`（LRU@1x 是病点、热池按 1.5~2x
+top-K 起配、相变步需回退全量）。
 
 ## 口径与限制
 
