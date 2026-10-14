@@ -35,7 +35,96 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R5 派单：S2 弱阳性同轮高重复确认跑（2026-10-15，蓝区）
+## §R6 派单：NUMA 归因实锤 + 绑定修复验证（2026-10-15，蓝区）
+
+### 目标
+
+R5 判读把 hybrid 噪声机制收窄到 CPU gather 段的 **NUMA 落点抽签**
+（anchor8 极差 3.96% vs hybrid 43~63%；R4 die 双峰 1.74x 三方互洽，
+drafts/die_bimodality_r4.md）。本轮直接裁决：(a) 拓扑取证（numactl -H）；
+(b) cpu/hybrid 的 NUMA 绑定 vs 不绑定同轮对比——若绑定消噪且提速，
+NUMA 归因实锤 + 修复方案落袋；若绑定无效应，NUMA 归因证伪。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R6: §R6 派单」。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；未重编。
+3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
+   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
+4. `which numactl` 存在。
+
+### 执行命令
+
+```bash
+cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
+cd tests && python3 test_scheme_tools.py && cd ..
+
+numactl -H
+lscpu | grep -i numa
+
+bash run_scheme_sweep.sh --schemes cpu --cards 8 1 --batch-size 24 \
+  --copy-count 300 --window 16 --numa-nodes "<NODES>" --repeat 3 \
+  --results-dir results/r6/numa_cpu
+
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 --hybrid-modes overlap \
+  --cards 8 --batch-size 24 --copy-count 300 --window 16 \
+  --numa-nodes "<NODES>" --repeat 4 --results-dir results/r6/numa_hybrid
+
+bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 24 \
+  --copy-count 300 --window 16 --repeat 3 --results-dir results/r6/anchor8
+
+python3 tools/repeat_spread.py results/r6/numa_cpu results/r6/numa_hybrid \
+  results/r6/anchor8 results/r5/confirm8 results/r5/anchor8
+```
+
+`"<NODES>"` 占位符：用 `numactl -H` 输出的节点 id 清单替换（`node N size:`
+行的 N 序列，空格分隔，**外层引号保留**——argparse 单参数）。节点数必须
+≥8（max cards）；若不足 8，把 B/C 组 `--cards 8 1` / `--cards 8` 中的 8 降为
+节点数，并在交付中注明。共 23 case（12/8/3，蓝区 dry-run 已核验；
+--numa-nodes 使每个 case 自动跑不绑定/绑定两遍，绑定态命名带 `_numa`）。
+
+### 通过标准
+
+- R6-G1：自检末两行 `Ran 41 tests` / `OK`。
+- R6-G2：三个 manifest 全 `status=="passed"`；23 个 case JSON 全 passed、
+  correctness 全 true；window==16；numa 组每坐标不绑定+绑定成对；
+  hybrid 组 `cpu_frac==0.1`。
+- R6-G3：`numactl -H` 与 `lscpu | grep -i numa` 输出原文回传。
+- R6-G4（跨轮一致性，非门槛）：anchor8 折叠 vs §R5 anchor8（171.343
+  GB/s）偏差 ≤15%。
+
+### 回传格式
+
+同 §R5：交付模板 + 三个目录的 `copy_scheme_timing_summary.md` 全文 +
+三个 manifest 全文 + `repeat_spread.py` 全部输出原文 + numactl/lscpu
+原文 + 2 个 case JSON 全文——numa_cpu cards8 不绑定 r1 与 `_numa` 绑定
+r1 各一（看 per-device gather 相位对比）。
+
+### 判读预案（派单时写死）
+
+- 比较口径：同轮同坐标，repeat 折叠带宽/avg_us_mean；极差用
+  repeat_spread.py 的 (max-min)/min；p99/p50 > 2 标「波动大」。
+- **NUMA 实锤**：numa_cpu cards8 绑定态折叠带宽较不绑定态升 >10%
+  （或 avg_us_mean 降 >10%）⇒ NUMA 实锤。
+- **落点抽签裁决**：numa_cpu cards8 绑定态 repeat 极差 ≤10% 且不绑定态
+  极差 >15% ⇒ 落点抽签实锤；绑定态均值 ≥ 不绑定态均值 ⇒ 绑定=修复，
+  纳入正式配置（与 pretouch 并列）。
+- **S2 升级判据**：numa_hybrid 绑定态 repeat 极差 ≤10% 且折叠带宽 ≥
+  同轮 anchor8 折叠 ×1.05 ⇒ S2 在 NUMA 归置形态下升级**强阳性**，
+  生产形态稿（drafts/production_form_hybrid.md，cf=0.1）解冻进入集成
+  实施评估。
+- **证伪分支**：绑定 vs 不绑定差异 <10% 且两组极差照旧 ⇒ NUMA 归因
+  证伪，噪声归因转向（频点/链路竞争，标注新候选），S2 冻结维持；
+  R7 回队列深度扫描（drafts/R5_queue_depth.md 改编号）。
+- cards1 为对照：单 die 绑定不应有显著差异；若差异 >10% 说明绑定本身
+  有开销/收益，单独标注。
+- 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
+
+---
+
+## §R5-旧 派单：S2 弱阳性同轮高重复确认跑（2026-10-15，蓝区）
 
 ### 目标
 

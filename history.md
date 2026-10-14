@@ -12,6 +12,19 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R6 NUMA 归因实锤 + 绑定修复验证（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+无代码改动，纯测量轮。R5 判读把 hybrid 噪声机制收窄到 CPU gather 段的
+NUMA 落点抽签（anchor 极差 3.96% vs hybrid 43~63% + R4 die 双峰 1.74x
+三方互洽），本轮裁决：numactl -H 拓扑取证 + cpu（cards8/1）与 hybrid
+（cf0.1 cards8）绑定/不绑定同轮对比 + npu anchor 哨兵，共 23 case
+（12/8/3，蓝区 dry-run 已核验；--numa-nodes 内建每 case 双跑）。
+通过标准 R6-G1..G4 与判读预案（NUMA 实锤 / 落点抽签裁决 / S2 升级 /
+证伪分支）见 pingpong.md §R6。
+**交付**（commit 本轮 push 后回填）：
+**判读**：待交付后蓝区填写。
+
 ## §R5 S2 弱阳性同轮高重复确认跑（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
