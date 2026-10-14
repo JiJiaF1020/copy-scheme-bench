@@ -22,7 +22,7 @@ C) THP=always+pretouch（24 case，自记原值自恢复）；D) cpu w16 轮内�
 核验）。通过标准 R4-G1..G4 与判读预案（S2 阳性 / frac 最优点 / 缺页实锤 /
 TLB 实锤 / gather 纯带宽 bound / breakeven 回填）见 pingpong.md §R4。
 **交付**（commit 本轮 push 后回填）：纯测量轮 106 case 全过（A frac 48 / B pretouch 24 / C THP+pretouch 24 / D base 8 / E npu anchor 2，RC 全 0）。G1-G4 全过：自检 39 OK；106 case passed+correctness 全 true+window==16+pretouch 分组对；THP 设置/恢复原值 madvise 一致；D vs R3w16 最大偏差 9.58%。关键事实：A 组 cards8 copy300 最优 cf0.1/0.4（178.4/178.9 GB/s）超 E 组 npu anchor 171.3；B pretouch cards8 copy300 cpu_gather 136.2 vs D base 253.3（-46%），cards1 持平；C THP+pretouch 未再降（cards8 179.4，反升）。breakeven 回填 rho*=0.25/0.20（cards1/8 copy300，远左移于 R3 预测 0.37）。结果 results/r4/{frac,pretouch,pretouch_thp,base,anchor}/。
-**判读**：待交付后蓝区填写。
+**判读**（蓝区，2026-10-15）：**S2 阳性（弱）**——A 组最优 cf0.4/cf0.1 的 hybrid cards8 copy300 = 178.90/178.41 GB/s ≥ 同轮 npu anchor 171.26（写死判据命中，+4.5%/+4.2%），延迟口径互证（212.06<221.86µs）；但 frac 曲线非单调（cf0.25 凹陷 157.4，相邻档 ±10%），边际与 run 噪声同量级 ⇒ 弱阳性，先入 R5 高重复确认跑再谈生产集成。cf*：cards8 延迟口径 0.1（生产推荐，max 全档最稳）/吞吐口径 0.4，cards4/copy100 内点 0.25；cards4 未过锚（75.4<76.7，跨轮+漂移史，证据弱）。**缺页实锤（cards8 限定）**——B pretouch vs D base 的 cpu_gather cards8 copy300 -46.2%（>15% 判据），cards1 持平（小池无效应）；端到端 folded -7.9%；pretouch 列为正式配置候选（R6 起默认）。**TLB 实锤不成立且 THP=always 有害**——C vs B 全坐标不降，cards8 gather +31.7%、总时 cards4/8 反升 16.4%/25.1%，THP 不采用。**breakeven 回填** ρ*（copy300）cards1 0.25 / cards8 0.20（同轮 w16 T0=5.1/7.2µs），左移于 R2 预测 0.37，驻留+增量路线深度过盈亏点结论加强。预测对照：①部分命中 ②证伪（翻阳）③证伪一半（cards8 非纯带宽 bound；TLB 无收益方向对、形式错）④命中（9.58%）。逐条裁决见 pingpong.md §R4 判读节。下一步 R5：S2 弱阳性同轮高重复确认跑（cf0.1/0.4+加密 0.15/0.3×cards8×repeat6 + 同轮 anchor）+ 蓝区并行生产形态设计稿；队列深度顺延 R6 候选。
 
 ## §R3 窗口化流水压 host 开销 + 复试（2026-10-15）
 

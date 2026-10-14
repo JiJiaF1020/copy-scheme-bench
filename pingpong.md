@@ -1629,6 +1629,87 @@ T0_cpu(w16) 实测 5.102/7.190µs（D 组 copy0，cards1/8）。对照 drafts/br
 - R4-G4 参考值取 results/r3/w16 同坐标 case（repeat 折叠）。
 - breakeven cards1 的 npu_full 139.0µs 取自 §R3 anchor（跨轮，R4 E 组仅 cards8）；cards8 为 R4 同轮。
 
+### 判读（§R4，2026-10-15，蓝区）
+
+对照 §R4「判读预案」（派单时写死）逐条裁决（除注明外均为绿区**实测值**，
+repeat 折叠后均值）：
+
+**门槛**：R4-G1 ✓（39 项 OK，绿区 pull 的 c6e5f62 即 39 项）/ R4-G2 ✓（五
+manifest 全 passed、106 case correctness 全 true、window=16 与 pretouch
+分档核验无串组）/ R4-G3 ✓（THP orig=madvise → 双 `[always]` → 恢复
+madvise，三次 cat 原文在案）/ R4-G4 ✓（D 对 R3 w16 同坐标最大偏差
+9.58% ≤15%）。
+
+**波动口径**：p99/p50 均 <2（1.33~1.83），无坐标触发「波动大」标注；
+但 cards8 copy300 档 avg_us_max 明显高于 mean（D 357.5 vs 277.1、C 399.4
+vs 319.3），**cards8 长尾显著**；A 组 cf0.25/cf0.6 档 max/mean 差 ~19%/13%。
+
+**裁决 1：S2 阳性（弱阳性）——判据命中，边际在噪声带内**
+
+- 写死判据「A 组最优 cf 的 hybrid copy300 cards8 带宽 ≥ 同轮 E 组 npu
+  anchor」：最优 cf0.4 = **178.897 GB/s**、次优 cf0.1 = 178.414，均 ≥
+  anchor **171.264** ⇒ **S2 阳性**（边际 +4.5%/+4.2%）。
+- 延迟口径互证：cf0.1 avg_us_mean 212.06 < anchor 221.86µs（-4.4%）；
+  cf0.4 216.91 < 221.86（-2.2%）。
+- **弱阳性标注**：frac 曲线非单调——cf0.25 凹陷至 157.39（相邻档摆动
+  ±10%），说明 run 级噪声与边际同量级；判据是「≥」故裁决为阳性，但证据
+  强度不足以直接指导生产集成，按预案进入确认跑（见 §R5）。
+- cf* 记录：cards8 copy300 吞吐口径 cf*=0.4（178.90）、延迟口径 cf*=0.1
+  （212.06µs 且 avg_us_max 219.6 全档最稳，**生产推荐 0.1**）；cards8
+  copy100 cf*=0.25（81.46，内点最优）；cards4 copy100/300 cf*=0.25
+  （33.04/75.40，内点最优）；copy0 档各 cf 无差异（33.6~36.6µs）。
+- cards4 未过锚：hybrid cards4 copy300 最优 75.40 < §R3 npu cards4 锚
+  76.70（跨轮，且 cards4 档有连续两轮漂移史，证据弱）——S2 目前仅
+  cards8 成立。
+
+**裁决 2：缺页实锤（cards8 限定），pretouch 纳入正式配置候选**
+
+- 写死判据「B 组 cpu_gather_us 较 D 组同坐标降 >15%」：cards8 copy300
+  **136.195 vs 253.258 = -46.2%** ⇒ **实锤**；cards1 copy300 持平
+  （69.053 vs 69.029）⇒ 小池无效应。
+- 机制解读（推测，与数据一致）：8 die 池地址空间 8 倍于单 die，run 内
+  first-touch 缺页持续发生；pretouch 把该成本移出计时区。cards1 池小，
+  warmup 即触完，故无差。
+- 端到端收益（实测，folded）：cards8 copy300 总时 255.30 vs 277.12µs
+  = -7.9%；cards1 -1.0%。缺页是 cards8 真实成本但非全部；gather 剩余
+  部分仍为带宽 bound。
+- 注意：-46.2% 为 B 折叠值 vs D r1 值（绿区已注明 D 组相位数据仅 r1 回
+  传）；即使保守按 r1 比 r1，降幅远超 15% 门槛，结论方向不依赖该口径。
+
+**裁决 3：TLB 实锤不成立，THP=always 在 cards8 显著有害，不采用**
+
+- 写死判据「C 组 cpu_gather_us 较 B 组同坐标再降 >10%」：全坐标不降——
+  cards1 copy100 +5.0%、cards1 copy300 持平、cards8 copy300 **+31.7%**
+  （179.394 vs 136.195）⇒ **TLB 实锤不成立**。
+- THP=always 有害（实测）：C 组 cards4/8 copy300 总时较 B 反升
+  16.4%/25.1%（307.7 vs 264.4 / 319.3 vs 255.3µs）。2MB 大页分配+
+  defrag 路径在大池高并发下引入新开销（机制推测）。**THP=always 不纳入
+  任何后续配置**，环境维持 madvise。
+
+**裁决 4：breakeven 回填（同轮 w16 T0_cpu 实测）**
+
+- ρ*（copy300 档，cpu-delta vs npu-full）：cards1 **0.25** / cards8
+  **0.20**（R4 同轮；T0=5.102/7.190µs 来自 D 组 copy0）。对照
+  drafts/breakeven_r2_preview.md 预测 0.64→0.37，实际进一步左移；与 §R3
+  回填（0.32/0.16）同量级互洽。
+- 结论加强：驻留+增量路线（churn 稳态 ρ=0.85~0.9）深度过盈亏点；
+  即使 ρ=0.3 的激进换出场景，cards1/8 也已越界进入 cpu-delta 收益区。
+
+**预测对照**（drafts/r4_prediction.md，派单前写死）：① cf* 低端——部分
+命中（cards8 延迟口径 cf0.1 命中，吞吐口径 cf0.4 未命中）；② S2 不翻阳——
+**证伪**（翻阳，弱阳性；预判自注「翻阳即最有价值的证伪」，正是）；③ gather
+纯带宽 bound——**证伪一半**（cards8 缺页实锤 -46.2%，非纯带宽 bound；C 方向
+对——TLB 无收益——但形式错：不是不动而是显著变差）；④ D 对 R3 偏差 <10%
+——命中（9.58%）。
+
+**下一步**：R5 = S2 弱阳性**同轮高重复确认跑**（最优区 cf0.1/0.4 + 曲线加密
+cf0.15/0.3，repeat 6，配同轮 npu anchor；cards4 次要确认）——边际 4.5% 与
+run 噪声同量级，必须先确认再投入生产形态设计。蓝区并行产出生产形态设计稿
+（hybrid 嵌入 vLLM 层间流水）。pretouch 确认为 cpu/hybrid 正式配置候选，
+R6 起纳入默认；队列深度扫描顺延 R6 候选。
+
+---
+
 ## §R3-旧 派单：窗口化流水压 host 开销 + cpu/hybrid 同坐标复试（2026-10-15，蓝区）
 
 ### 目标
