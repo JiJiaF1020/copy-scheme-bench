@@ -343,6 +343,19 @@ def wait_for_start(ready_file: Path | None, start_file: Path | None) -> None:
         time.sleep(0.001)
 
 
+def _quantiles(samples: list[float]) -> dict:
+    """p50/p90/p99/min/max/mean over per-iteration wall-clock samples (µs)."""
+    ordered = sorted(samples)
+    n = len(ordered)
+
+    def pick(q: float) -> float:
+        return ordered[min(n - 1, int(q * n))]
+
+    return {"mean": ordered and sum(ordered) / n or 0.0, "p50": pick(0.50),
+            "p90": pick(0.90), "p99": pick(0.99),
+            "min": ordered[0], "max": ordered[-1], "n": n}
+
+
 def time_npu(case: Case, args: argparse.Namespace) -> dict:
     """Blueprint-compatible event window plus a per-iteration synced wall time."""
     for _ in range(args.warmup):
@@ -358,14 +371,15 @@ def time_npu(case: Case, args: argparse.Namespace) -> dict:
     end.synchronize()
     avg_us = start.elapsed_time(end) * 1000 / args.iters
     synced_iters = max(1, args.iters // 4)
-    total_ns = 0
+    synced_us = []
     for _ in range(synced_iters):
         t0 = time.perf_counter_ns()
         launch_kernel(case)
         torch.npu.synchronize()
-        total_ns += time.perf_counter_ns() - t0
+        synced_us.append((time.perf_counter_ns() - t0) / 1000.0)
     return {"timer": "npu_event", "avg_us": avg_us,
-            "avg_us_host_synced": total_ns / synced_iters / 1000.0, "phases": {}}
+            "avg_us_host_synced": sum(synced_us) / len(synced_us),
+            "latency_us_synced": _quantiles(synced_us), "phases": {}}
 
 
 def time_cpu(case: Case, args: argparse.Namespace) -> dict:
@@ -375,7 +389,8 @@ def time_cpu(case: Case, args: argparse.Namespace) -> dict:
     wait_for_start(args.timing_ready_file, args.timing_start_file)
     start = torch.npu.Event(enable_timing=True)
     end = torch.npu.Event(enable_timing=True)
-    gather_ns = device_us = total_ns = 0.0
+    gather_us = device_wall_us = device_event_us = 0.0
+    total_us = []
     for _ in range(args.iters):
         t0 = time.perf_counter_ns()
         cpu_gather(case)
@@ -385,13 +400,17 @@ def time_cpu(case: Case, args: argparse.Namespace) -> dict:
         end.record()
         torch.npu.synchronize()
         t2 = time.perf_counter_ns()
-        gather_ns += t1 - t0
-        device_us += start.elapsed_time(end) * 1000
-        total_ns += t2 - t0
-    return {"timer": "perf_counter", "avg_us": total_ns / args.iters / 1000.0,
-            "avg_us_host_synced": None,
-            "phases": {"cpu_gather_us": gather_ns / args.iters / 1000.0,
-                       "h2d_scatter_us": device_us / args.iters}}
+        gather_us += (t1 - t0) / 1000.0
+        device_wall_us += (t2 - t1) / 1000.0
+        device_event_us += start.elapsed_time(end) * 1000
+        total_us.append((t2 - t0) / 1000.0)
+    return {"timer": "perf_counter", "avg_us": sum(total_us) / len(total_us),
+            "avg_us_host_synced": None, "latency_us": _quantiles(total_us),
+            "phases": {"cpu_gather_us": gather_us / args.iters,
+                       "device_wall_us": device_wall_us / args.iters,
+                       "device_event_us": device_event_us / args.iters,
+                       # host-side launch/sync overhead per iteration:
+                       "device_overhead_us": (device_wall_us - device_event_us) / args.iters}}
 
 
 def time_hybrid(case: Case, args: argparse.Namespace) -> dict:
@@ -401,7 +420,8 @@ def time_hybrid(case: Case, args: argparse.Namespace) -> dict:
     wait_for_start(args.timing_ready_file, args.timing_start_file)
     start = torch.npu.Event(enable_timing=True)
     end = torch.npu.Event(enable_timing=True)
-    gather_ns = kernel_us = total_ns = 0.0
+    first_us = tail_us = kernel_event_us = 0.0
+    total_us = []
     for _ in range(args.iters):
         t0 = time.perf_counter_ns()
         if serial:
@@ -424,14 +444,17 @@ def time_hybrid(case: Case, args: argparse.Namespace) -> dict:
             end.record()
             torch.npu.synchronize()
             t2 = time.perf_counter_ns()
-        gather_ns += t1 - t0
-        kernel_us += start.elapsed_time(end) * 1000
-        total_ns += t2 - t0
+        first_us += (t1 - t0) / 1000.0
+        tail_us += (t2 - t1) / 1000.0
+        kernel_event_us += start.elapsed_time(end) * 1000
+        total_us.append((t2 - t0) / 1000.0)
     first_phase = "kernel_wall_us" if serial else "launch_to_gather_done_us"
-    return {"timer": "perf_counter", "avg_us": total_ns / args.iters / 1000.0,
-            "avg_us_host_synced": None,
-            "phases": {first_phase: gather_ns / args.iters / 1000.0,
-                       "kernel_event_us": kernel_us / args.iters}}
+    tail_phase = "cpu_part_us" if serial else "h2d_scatter_tail_us"
+    return {"timer": "perf_counter", "avg_us": sum(total_us) / len(total_us),
+            "avg_us_host_synced": None, "latency_us": _quantiles(total_us),
+            "phases": {first_phase: first_us / args.iters,
+                       tail_phase: tail_us / args.iters,
+                       "kernel_event_us": kernel_event_us / args.iters}}
 
 
 def run(args: argparse.Namespace) -> dict:

@@ -83,17 +83,34 @@ def sort_key(row: dict) -> tuple:
 
 
 def build_rows(cases: list[dict]) -> list[dict]:
-    rows = [normalize_scheme_case(case) for case in cases]
-    if not rows:
+    """Normalize case files; repeats of one coordinate fold into a single row.
+
+    A sweep with --repeat N produces N files per coordinate. Each is normalized
+    on its own, then the group folds to the mean, recording run-count and the
+    sample stddev of avg_bandwidth (run-level fluctuation evidence).
+    """
+    normalized = [normalize_scheme_case(case) for case in cases]
+    if not normalized:
         raise ValueError("No cases available for analysis.")
-    seen = set()
-    for row in rows:
-        key = sort_key(row)
-        if key in seen:
-            raise ValueError(f"Duplicate scheme/cards/batch_size/copy_count: {key}; "
-                             "use a separate results directory or run manifest.")
-        seen.add(key)
-    return sorted(rows, key=sort_key)
+    groups: dict[tuple, list[dict]] = {}
+    for row in normalized:
+        groups.setdefault(sort_key(row), []).append(row)
+    rows = []
+    for key in sorted(groups):
+        group = groups[key]
+        if len(group) > 1:
+            import statistics
+            row = dict(group[0])
+            row["avg_us_mean"] = statistics.fmean(float(item["avg_us_mean"]) for item in group)
+            row["avg_us_max"] = statistics.fmean(float(item["avg_us_max"]) for item in group)
+            bandwidths = [float(item["avg_bandwidth"]) for item in group]
+            row["avg_bandwidth"] = statistics.fmean(bandwidths)
+            row["n_runs"] = len(group)
+            row["avg_bandwidth_std"] = statistics.stdev(bandwidths)
+            rows.append(row)
+        else:
+            rows.append(group[0])
+    return rows
 
 
 def formatted_row(row: dict) -> dict[str, str]:
