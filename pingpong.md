@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: R6d 派单已发出（R6c 判读完成：S2 强阳性解冻 + 抽签原坐标实锤 + fallback 首验通过），等待交付。
+- Current owner: **绿区**。Status: R6e 派单已发出（R6d 未交付即取消——用户优先 bs32 直接对比，新旧对账缩为 R6e G0 迷你组；R6c 判读：S2 强阳性解冻），等待交付。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,99 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R6d 派单：新旧带宽测试同机同轮对账（2026-10-15，蓝区）
+## §R6e 派单：cards8/bs32 五 copy 档直接对比（npu vs cpu vs hybrid±绑定 + 旧脚本对账）（2026-10-15，蓝区）
+
+### 目标
+
+用户指定坐标：**cards8、bs32、copy {100,200,300,500,2048}**。同机同轮产出
+直接对比表：旧脚本 npu / 新 bench npu 锚 / cpu±绑定 / hybrid cf0.1±绑定
+（cpu/hybrid 带 pretouch，生产形态三件套）。顺带以这 5 个坐标完成新旧
+对账（R6d 取消后的缩减版；bs24 对账不做）。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R6e: §R6e 派单」。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；未重编。
+3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
+   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
+4. 在 21 执行。**§R6d 已取消（未交付）**：若 R6d 已在跑，停下即可，
+   已产生的部分数据留档不判读。
+
+### 执行命令
+
+```bash
+cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
+cd tests && python3 test_scheme_tools.py && cd ..
+
+NODES=$(ls /sys/devices/system/node/ | grep '^node' | sed 's/^node//' | tr '\n' ' ' | sed 's/ *$//')
+NN=$(ls /sys/devices/system/node/ | grep -c '^node')
+if [ "$NN" -ge 8 ]; then CYCLE=""; else CYCLE="--numa-cycle"; fi
+echo "NODES='$NODES' NN=$NN CYCLE='$CYCLE'"
+
+# G0：旧脚本迷你组（蓝图仓，cards8 bs32 五 copy 档，5 case，蓝区 dry-run 已核）
+cd /home/h2d_test/nanovllm-scatter_copy
+CARD_COUNTS="8" BATCH_SIZES="32" COPY_COUNTS="100 200 300 500 2048" \
+  bash tests/run_scatter_copy_multiprocess.sh 2>&1 | tee run_r6e_old.log
+
+# A：新 bench npu 锚（15 case）
+cd /home/h2d_test/copy-scheme-bench
+bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 32 \
+  --copy-count 100 200 300 500 2048 --repeat 3 \
+  --results-dir results/r6e/npu8 2>&1 | tee run_r6e_npu.log
+
+# B：cpu（±绑定双跑，pretouch，30 case）
+bash run_scheme_sweep.sh --schemes cpu --cards 8 --batch-size 32 \
+  --copy-count 100 200 300 500 2048 --window 16 --pretouch \
+  --numa-nodes "$NODES" $CYCLE --repeat 3 \
+  --results-dir results/r6e/cpu8 2>&1 | tee run_r6e_cpu.log
+
+# C：hybrid cf0.1（±绑定双跑，pretouch，30 case）
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 --hybrid-modes overlap \
+  --cards 8 --batch-size 32 --copy-count 100 200 300 500 2048 --window 16 \
+  --pretouch --numa-nodes "$NODES" $CYCLE --repeat 3 \
+  --results-dir results/r6e/hybrid8 2>&1 | tee run_r6e_hybrid.log
+
+python3 tools/repeat_spread.py results/r6e/npu8 results/r6e/cpu8 results/r6e/hybrid8
+```
+
+共 80 case（5/15/30/30，蓝区 dry-run 已核）。默认参数两边一致
+（source-len 65536 / hbm-slots 8192 / copy-cap 16384 / warmup 10 /
+iters 1000 / seed 7 / --same-seed）。
+
+### 通过标准
+
+- R6e-G1：自检末两行 `Ran 47 tests` / `OK`。
+- R6e-G2：三个 manifest 全 passed；75 个 case JSON 全 passed、correctness
+  全 true；window==16；cpu/hybrid 组 `pretouch==true`；hybrid 组
+  `cpu_frac==0.1`；numa 组每坐标不绑定+绑定成对；G0 旧脚本 5 case 全 passed。
+- R6e-G3：`NODES=... NN=... CYCLE=...` 回显行回传。
+- R6e-G5：绑定路径日志行 + JSON `config.numa_bind` 一致（沿用 §R6c 口径）。
+
+### 回传格式
+
+交付模板 + 三个目录 `copy_scheme_timing_summary.md` 全文 + 三个 manifest
+全文 + `repeat_spread.py` 全部输出原文 + G0 旧脚本 5 个 case 的
+cards/bs/copy/avg_bandwidth（或蓝图 summary 文件全文）+ 绑定路径日志行
+（`grep -E "NUMA|LAUNCH" run_r6e_*.log` 原文）。
+
+### 判读预案（派单时写死）
+
+- **主对比表**：按 copy 档给 旧脚本 npu / 新 npu 折叠均值 / cpu 绑定 /
+  hybrid 绑定（附各自不绑定对照），同轮可比。
+- **bs32 复证 S2**：逐 copy 档判——hybrid8 绑定态折叠 ≥ 同轮 npu 锚
+  ×1.05 且绑定态极差 ≤10% ⇒ 该档强阳性复证成立。
+- **新旧等价（5 点）**：|新 npu 折叠均值 − 旧脚本值|/旧值 ≤5% ⇒ 新旧
+  等价在 bs32 坐标实锤；超线列出查因。
+- **绑定=修复复核**：cpu/hybrid 绑定态均值 ≥ 不绑定 ⇒ 维持；任一反向
+  >10% 标注。
+- **共享节点标注**：NN<8 循环映射沿用 §R6c 口径，不与 NN≥8 形态混比。
+- 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
+
+---
+
+## §R6d-旧 派单：新旧带宽测试同机同轮对账（2026-10-15，蓝区）（取消：未交付，用户优先 bs32 直接对比；新旧对账缩为 §R6e G0 迷你组，bs24 对账不做）
 
 ### 目标
 
