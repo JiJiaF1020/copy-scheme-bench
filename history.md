@@ -164,3 +164,8 @@ latency_us_synced，逐 case 已核）；R5-G4 anchor8 折叠 171.343 GB/s vs §
 42 case 全 <2；confirm4 54.823/53.807 均 < anchor4 63.300（参考项）。数据出处：
 results/r5/（gitignore 不入库）+ run_r5.log。判读留蓝区（§R5 判读预案三分支
 输入已齐：折叠带宽/极差/p99/p50/跨轮对照）。
+## §R6b NUMA 归因裁决（numactl 缺失修复版）（2026-10-15）
+
+**派单**（commit=8638f8d）：numactl 缺失修复——worker sched_setaffinity 兜底（池分配前绑节点 cpulist，first-touch 等效 membind），numactl 在则走原路径；日志/JSON 记 numa_bind 取证；自检 41→46 项全绿；23 case（12/8/3）dry-run 复核一致；R6 阻塞由 §R6b 取代。
+
+**交付**（commit 本轮 push 后回填）：R6b-G1 自检 46 tests OK；R6b-G2 三 manifest 全 passed + 23 case 全 passed + correctness 全 true（per_device 层 data_exact/guard_unchanged）+ window==16 + hybrid cpu_frac==0.1 + numa 组每坐标不绑定/绑定成对（r6b_verify2 bad=0）；R6b-G3 拓扑 4 节点(0-3)、numa_balancing=0；R6b-G4 anchor8 折叠 167.571 vs §R5 171.343（-2.20% ≤15%）；R6b-G5 numactl 原路径 rank→node 一一对应、JSON config.numa_bind 一致。执行环境：141.61.33.13 glm_52 容器（torch 2.10.0 匹配，13 宿主 ABI 不兼容）；<NODES>=4 节点 → A/B 组 cards 8→4、anchor8 保持 8。关键实测（折叠带宽，绑定 vs 不绑定）：numa_cpu cards1 24.488 vs 25.333（-3.34%）、cards4 94.896 vs 84.749（+11.97%，avg_us_mean -9.82%）；numa_hybrid cards4 89.538 vs 89.098（+0.49%）；anchor8 167.571（spread 3.30%）。判读留蓝区。数据出处：results/r6b/（13 上，gitignore 不入库）+ run_r6b_*.log。
