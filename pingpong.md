@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **蓝区**。Status: R6e 已交付+判读（新旧等价实锤；S2 bs32 复证 3/5 档成立；hybrid copy100 异常 ⇒ 生产形态需 copy 数门控；绑定=修复维持）；R7 队列深度扫描与候选 R8（copy 数门控阈值扫描）在队列待派。
+- Current owner: **蓝区**。Status: R6e 已交付+判读（新旧等价实锤；S2 bs32 复证 3/5 档成立；hybrid copy100 异常 ⇒ 生产形态需 copy 数门控；绑定=修复维持）；drafts/production_form_hybrid.md 已扩写机制详解（§0 + 4 张 SVG）；R7 队列深度扫描与候选 R8（copy 数门控阈值扫描）在队列待派。
 
 ## 0. 目标与口径
 

@@ -247,3 +247,12 @@ results/r5/（gitignore 不入库）+ run_r5.log。判读留蓝区（§R5 判读
 **派单**（commit=7f8427f）：回 21 跑 cards8 原坐标 17 case（6/8/3），首验 sched_setaffinity fallback 路径；新增 --numa-cycle 循环映射（rank→nodes[rank%NN]，NN=4<8 → rank4/5/6/7 共享 node0/1/2/3，共享节点标注不与 NN≥8 混比）；自检 46→47 项。
 
 **交付**（commit 本轮 push 后回填）：R6c-G1 自检 47 tests OK；R6c-G2 三 manifest 全 passed + 17 case 全 passed + correctness 全 true + window==16 + hybrid cpu_frac==0.1（r6c_verify bad=0）；R6c-G3 拓扑 4 节点、numa_balancing=1、which numactl=missing；R6c-G4 anchor8 折叠 168.512 vs §R5 171.343（-1.65% ≤15%）；R6c-G5 fallback 兜底路径首验成功（runner 级 numactl=missing fallback=sched_setaffinity nodes=0,1,2,3,0,1,2,3 + 每 worker node=<N> cpus=<清单> bound=1 + LAUNCH numa_bind=affinity_fallback rank→node 循环映射 rank0→0..rank7→3），JSON config.numa_bind 一致。执行环境：141.61.33.21（21 无 numactl，numa_balancing=1 与 13 的 0 不同，判读注意）。关键实测（折叠带宽，绑定 vs 不绑定）：numa_cpu8 170.603(9.53%) vs 138.285(28.98%) = +23.37%；numa_hybrid8 180.019(0.99%) vs 168.721(19.24%) = +6.70%；anchor8 168.512(0.37%)。判读输入：抽签复现——不绑定 28.98%>15% 且绑定 9.53%≤10% 双条件齐；S2 升级——绑定 0.99%≤10% 且 180.019 ≥ 168.512×1.05=176.938 双条件齐。判读留蓝区。数据出处：results/r6c/（21 上，gitignore 不入库）+ run_r6c_*.log。
+
+## 文档：hybrid 机制详解并入生产形态稿（2026-10-15，蓝区）
+
+drafts/production_form_hybrid.md 扩写：新增 §0 机制详解（一句话/带宽账
+/行级切分/双流 overlap/window=16/pretouch+NUMA/实测全景与门控），配
+4 张 SVG（drafts/assets/hybrid_{dataflow,timeline,numa,gating}.svg）；
+§4 NUMA 口径更新（R6 实锤纳入默认，原「未测」作废）；§5 风险 1 消解、
+新增门控阈值未标定；§6 队列更新（R6e 完成，R7/R8 在队列）。非测量轮，
+无执行数据。
