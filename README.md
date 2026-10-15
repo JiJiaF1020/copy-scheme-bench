@@ -36,7 +36,6 @@ copy-scheme-bench/
 ├── tools/breakeven.py           # 盈亏模型：T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
 ├── tools/breakeven_table.py     # 盈亏模型的 md 汇总表直读前端（交付判读用）
 ├── tools/repeat_spread.py       # repeat 极差表：逐坐标 (max-min)/min，>10% 标 UNSTABLE（可回溯分析历史结果目录）
-├── drafts/                      # 蓝区工作底稿（派单草稿、模型预览；非绿区任务面）
 └── tests/
     ├── _bootstrap.py            # 定位蓝图仓（SCATTER_ROOT），复用其六列口径
     ├── scheme_config.py         # 测试名/方案名/环境变量名
@@ -122,6 +121,23 @@ copy-scheme-bench/tools/build_queue_depth.sh 8   # 用完恢复
 | S4 depth 16 明显快于 8 | MTE2 在飞读数是瓶颈，kernel 还有一段免费空间 |
 | S5 绑定后 CPU 路径变快 | 生产部署必须做 NUMA 绑定 |
 
+## 实测结论（2026-10-15，A5 / 8×Ascend950DT）
+
+- **S2 hybrid 在甜区成立**：cards8、bs24~32、每请求 miss ≥300 token 时，
+  cf=0.1 + window16 + pretouch + NUMA 绑定形态较纯 kernel 稳定 **+6.8~10.5%**
+  （repeat 极差 ≤1%，字节级校验全过）。甜区外必须回退纯 kernel：copy100
+  档 hybrid 只有 kernel 的 ~57%（overlap 固定开销主导）——集成需按 miss
+  数门控，拐点在 200~300 之间。
+- **三件套是前提不是锦上添花**：无 window 时 host 固定开销 69~114µs/迭代
+  （window16 后 5~7µs）；无 pretouch 时 cards8 gather 段慢 46%；无 NUMA
+  绑定时 CPU 路径 run 级极差 29%（绑定后 9.5%，均值 +23%）。THP=always
+  有害，维持 madvise。
+- **S1 cpu 全量出局**：copy2048 档绑定态也塌到 115 GB/s（kernel 163），
+  全量 CPU gather 只适合作对照；cpu-delta（只搬 miss 增量）不受此限。
+- **S0 kernel 基线水平**：cards8/bs32 离散 656B 随机读 ≈163~175 GB/s
+  （8 卡聚合），与蓝图 `run_scatter_copy_multiprocess.sh` 同坐标差 ≤5%
+  （两 harness 互证，无改写回归）。
+
 ## 集合层分析（驻留+增量方向）
 
 搬运路径之外的第二个方向：top-K 集合相邻步重叠 ρ 高时，每步只搬差集。
@@ -134,8 +150,7 @@ python3 tools/breakeven.py results/copy_scheme_a5_c8  # T_delta(ρ) 与 cpu-delt
 python3 tools/breakeven_table.py summary.md           # 同上，但输入是粘贴的 md 汇总表（交付判读用）
 ```
 
-演示与结论见 `drafts/churn_synth_demo.md`（LRU@1x 是病点、热池按 1.5~2x
-top-K 起配、相变步需回退全量）。
+结论：LRU@1x 是病点、热池按 1.5~2x top-K 起配、相变步需回退全量。
 
 ## 口径与限制
 
