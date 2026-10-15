@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: R6c 派单已发出（R6b 判读完成：NUMA 实锤 + 绑定=修复；S2 待 cards8 原坐标裁决），等待交付。
+- Current owner: **绿区**。Status: R6d 派单已发出（R6c 判读完成：S2 强阳性解冻 + 抽签原坐标实锤 + fallback 首验通过），等待交付。
 
 ## 0. 目标与口径
 
@@ -33,7 +33,81 @@ vLLM 集成决策的带宽对比数据。
 - 对比只在**同机、同轮、同 cards/bs/copy 坐标**之间有效；跨机器/跨会话绝对值不可比。
 - 正确性门槛先于性能：任何 case 的 correctness 非全 true，该 case 数据无效。
 
+---
 
+## §R6d 派单：新旧带宽测试同机同轮对账（2026-10-15，蓝区）
+
+### 目标
+
+用户关切：fork 后的新 bench 与蓝图旧测试的 npu 带宽数字是否一致。同机同轮
+对账：(a) 旧脚本跑历史矩阵留档；(b) 新 bench npu 方案跑重叠坐标 repeat 3；
+(c) 重叠 12 坐标逐点偏差 ≤5% ⇒ 新旧等价实锤，此后历史曲线与本 bench 数字
+互认同一口径。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R6d: §R6d 派单」。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；未重编。
+3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
+   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
+4. 在 21 执行（两仓并排 /home/h2d_test，蓝图已构建；21 上蓝图仓可读）。
+
+### 执行命令
+
+```bash
+cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
+cd tests && python3 test_scheme_tools.py && cd ..
+
+# A：旧脚本历史矩阵（蓝图仓，原接口原默认，96 case，蓝区 dry-run 已核）
+cd /home/h2d_test/nanovllm-scatter_copy
+CARD_COUNTS="1 2 4 8" BATCH_SIZES="8 16 24 32" \
+COPY_COUNTS="0 100 200 300 500 2048" \
+  bash tests/run_scatter_copy_multiprocess.sh 2>&1 | tee run_r6d_old.log
+
+# B：新 bench npu 重叠坐标（bs24 × copy 0/100/300 × cards 1/2/4/8 ×repeat 3，36 case）
+cd /home/h2d_test/copy-scheme-bench
+bash run_scheme_sweep.sh --schemes npu --cards 1 2 4 8 --batch-size 24 \
+  --copy-count 0 100 300 --repeat 3 --results-dir results/r6d/npu_matrix \
+  2>&1 | tee run_r6d_new.log
+```
+
+两组的 source-len 65536 / hbm-slots 8192 / copy-cap 16384 / warmup 10 /
+iters 1000 / seed 7 / --same-seed 默认值完全一致（蓝区已核两边 dry-run
+命令行逐参数相同），差异只剩 runner 外壳。
+
+### 通过标准
+
+- R6d-G1：自检末两行 `Ran 47 tests` / `OK`。
+- R6d-G2：旧脚本 96 个 case JSON 全 passed（蓝图六列口径，结果在蓝图仓
+  results/scatter_copy_a5_c8/）；新 bench manifest passed、36 case 全
+  passed、correctness 全 true。
+- R6d-G3：回传旧脚本结果目录的 summary/markdown 全文（或逐 case JSON 的
+  cards/bs/copy/avg_bandwidth 列表）+ 新 bench timing_summary 全文。
+
+### 回传格式
+
+交付模板 + 上述两个 summary 全文 + 两个 manifest/结果清单 + 重叠坐标对照表
+（bs24 × copy{0,100,300} × cards{1,2,4,8} 共 12 点：旧值 / 新 repeat 折叠
+均值 / 新极差 / 偏差%）。
+
+### 判读预案（派单时写死）
+
+- **等价判据**：12 个重叠坐标 |新折叠均值 − 旧值|/旧值 ≤5% 且新极差 ≤5%
+  ⇒ 新旧等价实锤；任一坐标超线列出并查因。
+- copy0 行带宽恒 0 不参与偏差判据，只核 avg_us 量级（~11µs 固定开销）。
+- 非重叠坐标（bs8/16/32、copy200/500/2048）只留档，不与历史曲线跨轮比
+  （机器状态已变），作为同轮刷新的新基线。
+- 任何 case correctness 失败 ⇒ 该 case 无效。
+
+---
+
+## §R6c-旧 派单：S2 cards8 原坐标裁决 + fallback 路径首验（2026-10-15，蓝区）（已交付+判读）
+
+> 注：派单节原文（前置核验/命令/通过标准/判读预案五条）见 commit
+> `7f8427f`——绿区交付时覆盖了派单节，append-only 纪律不追溯改写，
+> 此处恢复标题维持结构；判读即按 `7f8427f` 写死的预案执行。
 
 ### 交付（§R6c，2026-10-15，绿区）
 
@@ -248,6 +322,45 @@ npu/0.0/0.5/overlap/8/24/300/300              6   171.343    2.150    3.96%  171
 **数据出处**：results/r6c/{numa_cpu8,numa_hybrid8,anchor8}（gitignore 不入库）+ run_r6c_{cpu,hybrid,anchor,spread}.log + /tmp/run_r6c_wrapper.log。
 
 判读留蓝区（绿区不改码，只回传原始数据）。
+
+### 判读（§R6c，2026-10-15，蓝区）
+
+全部关键数字经蓝区从 runs 明细独立复算，与绿区交付值逐位相符。
+
+**裁决 1（抽签复现）：实锤。** numa_cpu8 不绑定态极差 **28.98% >15%**（runs
+160.72/129.53/124.60——R5 式逐 run 偏移在 21 原坐标复现），绑定态极差
+**9.53% ≤10%**（180.86/165.82/165.13）。结合 R6b 的均值差实锤（+11.97%）
+与 gather 相位归因（-19.7%），**R5 的 43~63% 噪声 = CPU gather 段 NUMA
+落点问题，归因闭环**。注意 21 的 `numa_balancing=1`（autoNUMA 开着）抽签
+仍复现、绑定仍消噪——autoNUMA 救不了 first-touch 落点。
+
+**裁决 2（S2 升级）：强阳性，解冻。** numa_hybrid8 绑定态极差 **0.99% ≤10%**
+✓；绑定折叠 **180.019 ≥ anchor8 168.512×1.05=176.938** ✓（实际 ×1.068，
+**+6.82%**）。⇒ **S2 升级强阳性，drafts/production_form_hybrid.md
+（cf=0.1）解冻，进入集成实施评估**。边界标注：未达 R5 高簇外推的 +26%
+上限（~217 GB/s），稳态实得 +6.8%；高簇成因未明（R5 cf0.4 偶发的 216/217
+两 run），列为开放问题，不阻塞解冻。
+
+**裁决 3（绑定均值方向）：维持「绑定=修复」。** cpu8 +23.37%、hybrid8 +6.70%
+均正向，无反向 >10%。附带观测：cpu8 绑定态 170.6 ≈ anchor 168.5（+1.2%）
+——NUMA 修复后纯 cpu 路径在 cards8 copy300 已**追平** kernel（R4 时为
+-10%），cpu-delta 路线的容量上限同步上修。
+
+**裁决 4（fallback 首验）：通过。** 21 无 numactl：runner 级
+`numactl=missing` + 8 worker `bound=1`（cpulist 逐节点回传）+ JSON
+`config.numa_bind=affinity_fallback` 三方一致；`--numa-cycle` 循环映射
+（0,1,2,3,0,1,2,3）按设计生效。R6b 的代码修复在目标环境实战成立。
+
+**共享节点标注**：NN=4，rank4-7 与 rank0-3 共享 node0-3；共享形态下绑定
+仍 +23%/+6.7%，NN≥8 形态预期不劣于此（按派单口径不混比）。
+
+**哨兵**：anchor8 168.512 vs §R5 171.343 = -1.65%（21 同机，≤15% ✓），
+极差 0.37%——anchor 稳态再确认。
+
+**下一步**：(a) 生产形态解冻 ⇒ 蓝区产出 vLLM 集成实施评估（hybrid 嵌入
+层间流水，三件套：cf=0.1 + pretouch + NUMA 绑定）；(b) R6d 新旧带宽对账
+（用户关切，本轮同推）；(c) R7 队列深度扫描仍在队列（优先级让位于集成
+评估）；(d) 节点负载感知 rank→node 映射、R5 高簇成因列为候选开放问题。
 
 ---
 ## §R6b-旧 派单：NUMA 归因裁决（numactl 缺失修复版）（2026-10-15，蓝区）（已交付+判读）

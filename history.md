@@ -12,6 +12,19 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R6d 新旧带宽测试同机同轮对账（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+用户关切 fork 后新旧带宽数字是否一致。21 同机同轮：A 组旧脚本历史矩阵
+（CARD_COUNTS="1 2 4 8" BATCH_SIZES="8 16 24 32" COPY_COUNTS="0 100 200
+300 500 2048"，96 case，蓝区 dry-run 已核）；B 组新 bench npu 重叠坐标
+（bs24×copy{0,100,300}×cards{1,2,4,8}×repeat3，36 case，dry-run 已核）。
+两边默认参数（source-len/hbm-slots/copy-cap/warmup/iters/seed/same-seed）
+逐参数一致。判据：12 个重叠坐标 |新折叠均值−旧值|/旧值 ≤5% 且新极差 ≤5%
+⇒ 新旧等价实锤。通过标准 R6d-G1..G3 与判读预案见 pingpong.md §R6d。
+**交付**（commit 本轮 push 后回填）：
+**判读**：待交付后蓝区填写。
+
 ## §R6c S2 cards8 原坐标裁决 + fallback 路径首验（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
@@ -23,8 +36,22 @@ cards8 ±bind×4、anchor8×3 共 17 case（NN≥8 直映射 / NN<8 --numa-cycle
 新增 --numa-cycle（rank→nodes[rank%NN]），自检 46→47 全绿。通过标准
 R6c-G1..G5 与判读预案（抽签复现 / S2 升级 / 绑定均值方向 / fallback 验证 /
 共享节点标注）见 pingpong.md §R6c。
-**交付**（commit 本轮 push 后回填）：
-**判读**：待交付后蓝区填写。
+**交付**（commit a071883，绿区，21 原地执行；numactl missing ⇒ fallback
+首验）：R6c-G1..G5 全过；17 case 全 passed、correctness 全 true；拓扑
+4 节点 × 96 核、numa_balancing=1（21 特有）；--numa-cycle 循环映射
+0,1,2,3,0,1,2,3（rank4-7 共享节点，已标注）。关键实测（蓝区复算一致）：
+numa_cpu8 绑定 170.603（极差 9.53%）vs 不绑定 138.285（极差 28.98%）
+= **+23.37%**；numa_hybrid8 绑定 **180.019（极差 0.99%）** vs 不绑定
+168.721（19.24%）= +6.70%；anchor8 168.512（极差 0.37%，vs §R5 -1.65%
+同机）。fallback 三方取证一致（runner numactl=missing + worker bound=1
++ JSON numa_bind=affinity_fallback）。数据出处 21 的 results/r6c/。
+**判读**（蓝区，2026-10-15）：**S2 强阳性**——hybrid8 绑定 180.019 ≥
+anchor×1.05=176.938 且极差 0.99%，生产形态稿（cf=0.1）**解冻**进入集成
+实施评估；**落点抽签原坐标实锤**（不绑定 28.98%>15% 复现、绑定 9.53%
+消噪，R5 噪声=CPU gather 段 NUMA 落点，归因闭环）；绑定=修复维持
+（cpu8 绑定 170.6 已追平 kernel）；fallback 路径实战验证通过；+26% 高簇
+未兑现（稳态 +6.8%），高簇成因列为开放问题。逐条裁决见 pingpong.md
+§R6c 判读节。
 
 ## §R6b NUMA 归因裁决（numactl 缺失修复版）（2026-10-15）
 

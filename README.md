@@ -47,7 +47,7 @@ copy-scheme-bench/
     ├── test_scheme_worker.py    # 单卡 worker：npu/cpu/hybrid 三方案，迭代级分位数（torch 延迟导入）
     ├── run_scheme_multiprocess.py  # 多 die runner：两阶段文件握手，NUMA 绑定
     ├── run_scheme_sweep.py      # 矩阵 sweep：dry-run 免 NPU；--repeat N 做 run 级波动控制
-    └── test_scheme_tools.py     # macOS 自检（41 项，无 torch 依赖）
+    └── test_scheme_tools.py     # macOS 自检（47 项，无 torch 依赖）
 ```
 
 口径单一来源：六列数学、`validate_workload`、常量全部 import 自蓝图仓
