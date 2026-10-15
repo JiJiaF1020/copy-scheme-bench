@@ -409,6 +409,21 @@ class SweepCliTests(unittest.TestCase):
         bound = [extra for _, _, _, extra in planned if extra]
         self.assertEqual(bound[0][NUMA_ENV], "0,1")
 
+    def test_numa_cycle_reuses_nodes_round_robin(self):
+        with patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7"}, clear=True):
+            args = run_scheme_sweep.parse_args(
+                ["--cards", "8", "--batch-size", "3", "--copy-count", "7",
+                 "--schemes", "npu", "--numa-nodes", "0 1 2 3", "--numa-cycle"])
+            planned = list(run_scheme_sweep.cases(args))
+        self.assertEqual(len(planned), 2)
+        bound = [extra for _, _, _, extra in planned if extra]
+        self.assertEqual(bound[0][NUMA_ENV], "0,1,2,3,0,1,2,3")
+        with patch.dict(os.environ, {"TEST_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7"}, clear=True):
+            with self.assertRaises(ValueError):
+                run_scheme_sweep.parse_args(
+                    ["--cards", "8", "--batch-size", "3", "--copy-count", "7",
+                     "--schemes", "npu", "--numa-nodes", "0 1 2 3"])
+
     def test_invalid_requests_fail_before_launch(self):
         base = ["--cards", "1", "--batch-size", "3", "--copy-count", "7"]
         for extra in (["--schemes", "bogus"], ["--run-fracs", "1.5"], ["--cpu-fracs", "-0.5"],

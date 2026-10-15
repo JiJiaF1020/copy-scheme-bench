@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: R6b 派单已发出（R6 因 numactl 缺失阻塞，已由 §R6b 代码兜底取代），等待交付。
+- Current owner: **绿区**。Status: R6c 派单已发出（R6b 判读完成：NUMA 实锤 + 绑定=修复；S2 待 cards8 原坐标裁决），等待交付。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,112 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §R6b 派单：NUMA 归因裁决（numactl 缺失修复版）（2026-10-15，蓝区）
+## §R6c 派单：S2 cards8 原坐标裁决 + fallback 路径首验（2026-10-15，蓝区）
+
+### 目标
+
+R6b 实锤 NUMA（cards4 绑定 +11.97%，增益落 gather 段 -19.7%），但 S2 升级
+判据因降卡（13 机仅 4 节点）不可判。本轮回 **21（R5 噪声原地）** 跑 cards8
+原坐标：(a) S2 裁决——hybrid cf0.1 cards8 绑定态极差 ≤10% 且折叠带宽 ≥
+同轮 anchor8 ×1.05 ⇒ 强阳性解冻；(b) 抽签复现裁决——cpu cards8 不绑定态
+复现 R5 式抽签（极差 >15%）且绑定态消噪（≤10%）；(c) 21 无 numactl ⇒
+首验 worker sched_setaffinity 兜底路径（R6b 代码修复的实战检验）。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R6c: §R6c 派单」。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；未重编。
+3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
+   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
+4. `which numactl || echo missing` 回传（预期 missing → 兜底路径；存在则
+   numactl 原路径，两条路径均已验证，不阻塞）。
+5. 在 21 执行。若 21 被占用/不可用：改 13/glm_52 容器执行并在交付注明
+   （13 为 numactl 路径，判读口径不变，标注跨机）。
+
+### 执行命令
+
+```bash
+cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
+cd tests && python3 test_scheme_tools.py && cd ..
+
+which numactl || echo numactl-missing
+ls /sys/devices/system/node/ | grep '^node' | sed 's/^node//' | tr '\n' ' '
+cat /sys/devices/system/node/node*/cpulist
+cat /proc/sys/kernel/numa_balancing
+
+NODES=$(ls /sys/devices/system/node/ | grep '^node' | sed 's/^node//' | tr '\n' ' ' | sed 's/ *$//')
+NN=$(ls /sys/devices/system/node/ | grep -c '^node')
+if [ "$NN" -ge 8 ]; then CYCLE=""; else CYCLE="--numa-cycle"; fi
+echo "NODES='$NODES' NN=$NN CYCLE='$CYCLE'"
+
+bash run_scheme_sweep.sh --schemes cpu --cards 8 --batch-size 24 \
+  --copy-count 300 --window 16 --numa-nodes "$NODES" $CYCLE --repeat 3 \
+  --results-dir results/r6c/numa_cpu8 2>&1 | tee run_r6c_cpu.log
+
+bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 --hybrid-modes overlap \
+  --cards 8 --batch-size 24 --copy-count 300 --window 16 \
+  --numa-nodes "$NODES" $CYCLE --repeat 4 --results-dir results/r6c/numa_hybrid8 \
+  2>&1 | tee run_r6c_hybrid.log
+
+bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 24 \
+  --copy-count 300 --window 16 --repeat 3 --results-dir results/r6c/anchor8 \
+  2>&1 | tee run_r6c_anchor.log
+
+python3 tools/repeat_spread.py results/r6c/numa_cpu8 results/r6c/numa_hybrid8 \
+  results/r6c/anchor8 results/r5/confirm8 results/r5/anchor8
+```
+
+共 17 case（6/8/3，蓝区双分支 dry-run 已核：NN≥8 直映射 nodes[:8]；NN<8
+时 --numa-cycle 循环映射 rank→nodes[rank%NN]，实例 `0,1,2,3,0,1,2,3`）。
+anchor 组不带 --numa-nodes（哨兵不绑定）。新增 `--numa-cycle` 为本轮代码
+变更（run_scheme_sweep.py，自检 46→47）。
+
+### 通过标准
+
+- R6c-G1：自检末两行 `Ran 47 tests` / `OK`。
+- R6c-G2：三个 manifest 全 `status=="passed"`；17 个 case JSON 全 passed、
+  correctness 全 true（per_device[i].correctness）；numa 组每坐标不绑定+
+  绑定成对；hybrid 组 `cpu_frac==0.1`、`window==16`。
+- R6c-G3：拓扑取证回传——`NODES=... NN=... CYCLE=...` 回显行、各节点
+  cpulist 原文、numa_balancing 值、which numactl 结果。
+- R6c-G4（非门槛）：anchor8 折叠 vs §R5 171.343 偏差 ≤15%（21 同机时可比；
+  13 执行则仅参考）。
+- R6c-G5：绑定路径日志行回传（兜底路径：runner 级
+  `A5_COPY_SCHEME_NUMA_FALLBACK numactl=missing` + 每 worker
+  `A5_COPY_SCHEME_NUMA_FALLBACK node=<N> cpus=<清单> bound=1`；numactl 路径：
+  LAUNCH 行 `numa_bind=numactl`），结果 JSON `config.numa_bind` 与日志一致。
+
+### 回传格式
+
+同 §R6b：交付模板 + 三个目录 `copy_scheme_timing_summary.md` 全文 +
+三个 manifest 全文 + `repeat_spread.py` 全部输出原文 + 拓扑取证原文 +
+绑定路径日志行（`grep -E "NUMA|LAUNCH" run_r6c_*.log` 原文）+ 2 个 case
+JSON 全文——numa_hybrid8 绑定 r1 与不绑定 r1 各一（看 per-die gather/kernel
+相位对比）。
+
+### 判读预案（派单时写死）
+
+- **抽签复现裁决**：numa_cpu8 不绑定态极差 >15% 且绑定态极差 ≤10% ⇒
+  落点抽签在 R5 原坐标实锤 + 绑定消噪成立。若不绑定态极差 ≤10% ⇒ 21 的
+  R5 噪声已消失/环境相关，如实记录（不推翻 R6b 已实锤的均值差结论）。
+- **S2 升级判据**：numa_hybrid8 绑定态极差 ≤10% 且折叠带宽 ≥ 同轮
+  anchor8 折叠 ×1.05 ⇒ S2 升级**强阳性**，生产形态稿
+  （drafts/production_form_hybrid.md，cf=0.1）解冻进入集成评估；
+  ≥ anchor8 但 < ×1.05 维持弱阳性冻结；< anchor8 翻回阴性。
+- **绑定均值方向**：cpu8/hybrid8 绑定态均值 ≥ 不绑定态 ⇒ 维持
+  「绑定=修复」（R6b 已立）；任一反向 >10% 标注并按「节点负载映射」
+  候选复查（R6b 附带发现）。
+- **fallback 验证**：numactl missing 时日志必须见 G5 所列兜底行；缺行即
+  实现 bug，该 case 数据有效但单独标注。
+- **共享节点标注**：NN<8 走循环映射时两个 worker 共享一个节点，绑定态
+  带宽上限受节点内控制器共享影响，判读时标注，不与 NN≥8 形态混比。
+- 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
+
+---
+
+## §R6b-旧 派单：NUMA 归因裁决（numactl 缺失修复版）（2026-10-15，蓝区）（已交付+判读）
 
 ### 与 §R6 的关系
 

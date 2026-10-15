@@ -12,6 +12,20 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R6c S2 cards8 原坐标裁决 + fallback 路径首验（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+R6b 实锤 NUMA（cards4 绑定 +11.97%、gather 段 -19.7%）但 S2 因降卡不可判；
+本轮回 21（R5 噪声原地）跑 cards8 原坐标：cpu8 ±bind×3、hybrid cf0.1
+cards8 ±bind×4、anchor8×3 共 17 case（NN≥8 直映射 / NN<8 --numa-cycle
+循环映射双分支 dry-run 已核）。21 无 numactl ⇒ 首验 sched_setaffinity
+兜底路径；21 被占则改 13/glm_52（标注跨机）。代码变更：run_scheme_sweep.py
+新增 --numa-cycle（rank→nodes[rank%NN]），自检 46→47 全绿。通过标准
+R6c-G1..G5 与判读预案（抽签复现 / S2 升级 / 绑定均值方向 / fallback 验证 /
+共享节点标注）见 pingpong.md §R6c。
+**交付**（commit 本轮 push 后回填）：
+**判读**：待交付后蓝区填写。
+
 ## §R6b NUMA 归因裁决（numactl 缺失修复版）（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：

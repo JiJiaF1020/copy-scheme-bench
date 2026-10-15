@@ -66,6 +66,8 @@ def parse_args(argv=None):
         parser.add_argument(f"--{flag}", type=int, default=os.getenv(env, str(default)))
     parser.add_argument("--numa-nodes", default=os.getenv("NUMA_NODES", ""),
                         help='Space/comma-separated node ids, e.g. "0 1 2 3"; when set, every case runs twice (unbound and bound).')
+    parser.add_argument("--numa-cycle", action="store_true", default=os.getenv("NUMA_CYCLE") == "1",
+                        help="Allow fewer node ids than cards: rank r binds nodes[r %% len(nodes)].")
     parser.add_argument("--pretouch", action="store_true", default=os.getenv("PRETOUCH") == "1")
     parser.add_argument("--window", type=int, default=int(os.getenv("WINDOW", "1")),
                         help="cpu/hybrid iterations per sync window; environment: WINDOW.")
@@ -98,8 +100,9 @@ def parse_args(argv=None):
     if max(args.cards) > len(visible):
         raise ValueError(f"Requested {max(args.cards)} dies, but only {len(visible)} devices are visible.")
     args.numa_nodes = [int(part) for part in args.numa_nodes.replace(",", " ").split()]
-    if args.numa_nodes and max(args.cards) > len(args.numa_nodes):
-        raise ValueError("NUMA sweep needs at least as many node ids as the largest --cards value.")
+    if args.numa_nodes and not args.numa_cycle and max(args.cards) > len(args.numa_nodes):
+        raise ValueError("NUMA sweep needs at least as many node ids as the largest --cards value "
+                         "(or pass --numa-cycle to reuse nodes round-robin).")
     if os.getenv("DTYPES", DTYPE).split() != [DTYPE]:
         raise ValueError(f"The scheme sweep uses {DTYPE}; DTYPES must be {DTYPE} if set.")
     if args.window < 1:
@@ -156,7 +159,13 @@ def cases(args):
                                         command += ["--window", str(args.window)]
                                     env_extra = {}
                                     if numa:
-                                        env_extra[NUMA_ENV] = ",".join(str(node) for node in args.numa_nodes[:cards])
+                                        if args.numa_cycle:
+                                            env_extra[NUMA_ENV] = ",".join(
+                                                str(args.numa_nodes[rank % len(args.numa_nodes)])
+                                                for rank in range(cards))
+                                        else:
+                                            env_extra[NUMA_ENV] = ",".join(
+                                                str(node) for node in args.numa_nodes[:cards])
                                     yield name, output, command, env_extra
 
 
