@@ -36,6 +36,7 @@ copy-scheme-bench/
 ├── tools/breakeven.py           # 盈亏模型：T_delta(ρ) 与 cpu-delta vs npu-full 交叉点
 ├── tools/breakeven_table.py     # 盈亏模型的 md 汇总表直读前端（交付判读用）
 ├── tools/repeat_spread.py       # repeat 极差表：逐坐标 (max-min)/min，>10% 标 UNSTABLE（可回溯分析历史结果目录）
+├── tools/h2d_probe.py           # 诊断：连续大块 pinned H2D 带宽探针（区分链路差 vs 随机读路径差）
 └── tests/
     ├── _bootstrap.py            # 定位蓝图仓（SCATTER_ROOT），复用其六列口径
     ├── scheme_config.py         # 测试名/方案名/环境变量名

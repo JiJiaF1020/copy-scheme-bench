@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="470" viewBox="0 0 1000 470" font-family="PingFang SC, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="ar-r" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#c0392b"/></marker>
+    <marker id="ar-gr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2b7a46"/></marker>
+  </defs>
+
+  <text x="500" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#222">NUMA 绑定：把「页落点抽签」改成「固定本节点」（R6b/R6c 实锤）</text>
+
+  <!-- left panel: unbound -->
+  <rect x="30" y="70" width="460" height="320" rx="10" fill="#fdf6f6" stroke="#d9a0a0"/>
+  <text x="50" y="98" font-size="14" font-weight="bold" fill="#c0392b">不绑定：页落点抽签（每 run 落点不同）</text>
+  <rect x="70" y="130" width="180" height="70" rx="6" fill="#ffffff" stroke="#888888"/>
+  <text x="82" y="156" font-size="12" fill="#333">worker 进程</text>
+  <text x="82" y="176" font-size="11" fill="#666">8 个 gather 线程</text>
+
+  <rect x="70" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="88" y="315" font-size="12" fill="#555">node0</text>
+  <rect x="170" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="188" y="315" font-size="12" fill="#555">node1</text>
+  <rect x="270" y="280" width="80" height="60" fill="#f8d7da" stroke="#c0392b" stroke-width="2"/>
+  <text x="288" y="308" font-size="12" fill="#c0392b">node2</text>
+  <text x="282" y="328" font-size="11" fill="#c0392b">池页 ×</text>
+  <rect x="370" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="388" y="315" font-size="12" fill="#555">node3</text>
+
+  <line x1="160" y1="200" x2="205" y2="280" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ar-r)"/>
+  <line x1="160" y1="200" x2="300" y2="280" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ar-r)"/>
+  <line x1="160" y1="200" x2="415" y2="280" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ar-r)"/>
+  <text x="176" y="238" font-size="10" fill="#c0392b">run1</text>
+  <text x="238" y="222" font-size="10" fill="#c0392b">run2</text>
+  <text x="330" y="222" font-size="10" fill="#c0392b">run3</text>
+  <text x="50" y="368" font-size="12" fill="#c0392b">跨节点访存 · run 级极差 28.98%（R6c cpu8 复现）</text>
+
+  <!-- right panel: bound -->
+  <rect x="510" y="70" width="460" height="320" rx="10" fill="#f2f9f4" stroke="#9fc9a8"/>
+  <text x="530" y="98" font-size="14" font-weight="bold" fill="#2b7a46">绑定：first-touch 落本节点</text>
+  <rect x="550" y="130" width="210" height="70" rx="6" fill="#ffffff" stroke="#888888"/>
+  <text x="562" y="156" font-size="12" fill="#333">rank r 先 sched_setaffinity</text>
+  <text x="562" y="176" font-size="11" fill="#666">（node r%4 的 cpulist，再分配池）</text>
+
+  <rect x="550" y="280" width="80" height="60" fill="#d8efdf" stroke="#2b7a46" stroke-width="2"/>
+  <text x="568" y="308" font-size="12" fill="#2b7a46">node0</text>
+  <text x="562" y="328" font-size="11" fill="#2b7a46">池页 ✓</text>
+  <rect x="650" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="668" y="315" font-size="12" fill="#555">node1</text>
+  <rect x="750" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="768" y="315" font-size="12" fill="#555">node2</text>
+  <rect x="850" y="280" width="80" height="60" fill="#ffffff" stroke="#aaaaaa"/>
+  <text x="868" y="315" font-size="12" fill="#555">node3</text>
+
+  <line x1="620" y1="200" x2="600" y2="280" stroke="#2b7a46" stroke-width="2.5" marker-end="url(#ar-gr)"/>
+  <text x="530" y="368" font-size="12" fill="#2b7a46">本节点访存 · 极差 9.53% · 均值 +23.4%（R6c cpu8 绑定）</text>
+
+  <text x="40" y="430" font-size="12" fill="#777">机制：绑定先于 DRAM 镜像 / staging 池分配 ⇒ first-touch 等效 membind（21 无 numactl，走 sched_setaffinity 兜底）；NN=4&lt;8 时 rank4–7 与 rank0–3 共享节点</text>
+  <text x="40" y="452" font-size="12" fill="#777">autoNUMA（numa_balancing=1）救不了 first-touch 落点：21 上抽签照样复现、绑定照样消噪</text>
+</svg>
