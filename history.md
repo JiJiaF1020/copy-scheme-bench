@@ -22,7 +22,7 @@ B cpu±绑定 pretouch（30）+ C hybrid cf0.1±绑定 pretouch（30），共 80
 极差 ≤10%）/ 新旧等价 5 点 ≤5% / 绑定=修复复核。§R6d 未交付即取消
 （用户优先 bs32 对比；新旧对账缩为本轮 G0，bs24 对账不做）。通过标准
 R6e-G1..G5 见 pingpong.md §R6e。
-**交付**（commit 本轮 push 后回填）：
+**交付**（commit 本轮 push 后回填）：R6e-G1 自检 47 tests OK；R6e-G2 三 manifest 全 passed + 75 case 全 passed + correctness 全 true + window==16 + pretouch==true + cpu_frac==0.1 + numa 成对（r6e_verify bad=0）；R6e-G3 拓扑 4 节点、NN=4 循环映射、numa_balancing=1；R6e-G5 fallback 日志行 + config.numa_bind 一致。执行环境：141.61.33.21（21 无 numactl → sched_setaffinity fallback）。关键实测（折叠带宽 GB/s，绑定/不绑定按 _numa 拆分）：主对比表 copy100/200/300/500/2048——G0 旧 170.62/166.95/165.60/164.16/163.89；A npu 175.19/173.02/167.99/164.82/162.83（新旧 5 点全 ≤5% 等价）；cpu 绑定 154.79/173.78/171.72/158.16/115.13 vs 不绑定 158.67/171.29/143.29/161.08/113.16；hybrid 绑定 100.31/175.68/181.91/182.18/176.24 vs 不绑定 104.38/178.44/177.40/178.24/175.30。判读输入：S2 复证 copy300/500/2048 三档成立（hybrid8 绑定 ≥ npu 锚×1.05 且绑定极差 ≤10%），copy100 hybrid 异常低（~100，稳定低值）、copy200 +1.5% 不达 5% 线；绑定复核无 >10% 反向。判读留蓝区。数据出处：results/r6e/（21 上，gitignore 不入库）+ run_r6e_*.log。
 **判读**：待交付后蓝区填写。
 
 ## §R6d 新旧带宽测试同机同轮对账（2026-10-15）（取消：未交付）

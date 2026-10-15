@@ -125,6 +125,269 @@ cards/bs/copy/avg_bandwidth（或蓝图 summary 文件全文）+ 绑定路径日
 - **共享节点标注**：NN<8 循环映射沿用 §R6c 口径，不与 NN≥8 形态混比。
 - 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
 
+### 交付（§R6e，2026-10-15，绿区）
+
+
+**执行环境**：141.61.33.21（work21，主仓原地）。8 卡 Health=Warning + HBM 占用（Util 0%）；**numactl missing**（`which numactl` rc=1）→ **sched_setaffinity fallback 兜底路径**（§R6b/R6c 首验后本轮回放）；`numa_balancing`=1（21 特有，13 为 0）；NUMA 4 节点（node0 0-95/node1 96-191/node2 192-287/node3 288-383）。拓扑：`NODES='0 1 2 3'` `NN=4` `CYCLE='--numa-cycle'`（NN=4<8 → rank→nodes[rank%4] 循环映射，**rank4/5/6/7 与 rank0/1/2/3 共享 node0/1/2/3**——共享节点带宽上限受节点内控制器共享影响，判读标注，不与 NN≥8 形态混比）。蓝图内核 QUEUE_DEPTH=8 未重编；新 bench 三 manifest `queue_depth=default`。
+
+**执行链**：
+- R6e-G1：自检末两行 `Ran 47 tests` / `OK` ✓
+- R6e-G2：三 manifest 全 `passed` + **75 case 全 passed** + correctness 全 true（per_device 层 data_exact/guard_unchanged 等；npu 5 字段、cpu/hybrid 2 字段，全 true）+ window==16 + cpu/hybrid `pretouch==true` + hybrid `cpu_frac==0.1` + numa 组每坐标不绑定/绑定成对（r6e_verify bad=0；npu 无 numa 变体为预期）+ G0 旧脚本 5 case 全 passed ✓
+- R6e-G3：拓扑取证——NODES='0 1 2 3'、NN=4、CYCLE='--numa-cycle'；config.numa_nodes='0,1,2,3,0,1,2,3' 一致 ✓
+- R6e-G5：fallback 路径日志行（runner 级 numactl=missing + 每节点 bound=1 + LAUNCH 行 numa_bind=affinity_fallback rank→node 循环映射）与 JSON `config.numa_bind` 一致（cpu8 绑定 15/15、hybrid8 绑定 15/15；不绑定 case numa_bind=none）✓
+
+**主对比表（折叠带宽 `summary.avg_bandwidth` GB/s；绑定/不绑定按文件名 `_numa` 拆分，n=3 均值）**：
+
+| copy | G0 旧脚本 | A 新 npu 折叠 | cpu 绑定 | cpu 不绑定 | hybrid 绑定 | hybrid 不绑定 |
+|---|---|---|---|---|---|---|
+| 100 | 170.62 | 175.19 | 154.79 | 158.67 | 100.31 | 104.38 |
+| 200 | 166.95 | 173.02 | 173.78 | 171.29 | 175.68 | 178.44 |
+| 300 | 165.60 | 167.99 | 171.72 | 143.29 | 181.91 | 177.40 |
+| 500 | 164.16 | 164.82 | 158.16 | 161.08 | 182.18 | 178.24 |
+| 2048 | 163.89 | 162.83 | 115.13 | 113.16 | 176.24 | 175.30 |
+
+per-run 明细（GB/s，各 3 run）：
+- npu 折叠：copy100 [173.06,179.00,173.50] / 200 [175.53,168.95,174.59] / 300 [166.41,172.93,164.63] / 500 [164.73,163.61,166.11] / 2048 [160.56,161.18,166.74]
+- cpu 绑定：copy100 [154.31,150.15,159.91] / 200 [172.38,170.37,178.57] / 300 [175.58,167.10,172.47] / 500 [164.97,145.93,163.59] / 2048 [119.21,112.09,114.09]
+- cpu 不绑定：copy100 [173.27,159.02,143.71] / 200 [167.72,176.59,169.56] / 300 [140.44,116.10,173.33] / 500 [155.38,159.95,167.90] / 2048 [102.44,118.47,118.58]
+- hybrid 绑定：copy100 [100.59,99.13,101.22] / 200 [173.88,174.51,178.64] / 300 [181.38,182.32,182.04] / 500 [181.42,183.58,181.53] / 2048 [177.28,177.84,173.59]
+- hybrid 不绑定：copy100 [116.14,90.37,106.62] / 200 [180.70,177.44,177.18] / 300 [168.81,181.16,182.24] / 500 [177.52,177.34,179.87] / 2048 [173.78,180.57,171.54]
+
+（注：`copy_scheme_timing_summary.md/csv` 与 `repeat_spread.py` 输出为**绑定+不绑定混聚 n=6** 均值；主对比表按 `_numa` 拆分后的绑定/不绑定各自 n=3 均值。）
+
+**判读输入（绿区只给原始数据与判据比对，结论留蓝区）**：
+- **新旧等价（5 点）**：G0 旧 vs A 新 npu 折叠——copy100 +2.7%、copy200 +3.6%、copy300 +1.4%、copy500 +0.4%、copy2048 −0.6%，**全部 ≤5%** ⇒ 新旧等价在 bs32 坐标 5 档全成立（8 卡 ~163-175 GB/s 是两 harness 一致水平，非改前改后差异）。
+- **bs32 复证 S2（逐 copy 档：hybrid8 绑定折叠 ≥ 同轮 npu 锚×1.05 且绑定极差 ≤10%）**：
+  - copy300：181.91 ≥ 167.99×1.05=176.39 ✓ 且绑定极差 0.21% ✓
+  - copy500：182.18 ≥ 164.82×1.05=173.06 ✓ 且绑定极差 0.54% ✓
+  - copy2048：176.24 ≥ 162.83×1.05=170.97 ✓ 且绑定极差 1.07% ✓
+  - copy200：175.68 vs 173.02×1.05=181.67 ✗（+1.5% <5%）
+  - copy100：100.31 vs 175.19×1.05=183.95 ✗（**hybrid copy100 异常低**：绑定 3 run 99.13/100.59/101.22 稳定低值、不绑定 90.37/116.14/106.62 亦低——copy 数小时 hybrid overlap 发射开销主导，连 npu 一半都不到）
+- **绑定=修复复核（绑定均值 ≥ 不绑定，反向 >10% 标注）**：
+  - cpu：100 −2.4% / 200 +1.5% / 300 **+19.8%** / 500 −1.8% / 2048 +1.7%——无 >10% 反向；copy300 绑定增益显著（不绑定高方差 s=23.45，140.44/116.10/173.33）
+  - hybrid：100 −3.9% / 200 −1.5% / 300 +2.5% / 500 +2.2% / 2048 +0.5%——无 >10% 反向；高 copy 档绑定稳定 ≥ 不绑定
+- **共享节点标注**：NN=4 循环映射 rank4/5/6/7 共享 node0/1/2/3（LAUNCH 行 rank4→node0 … rank7→node3），绑定态带宽上限受节点内控制器共享影响，不与 NN≥8 形态混比。
+- **稳定性标注**：repeat_spread 混聚 n=6——cpu copy100/300/500/2048 与 hybrid copy100 标 UNSTABLE（spread >10%）；按 `_numa` 拆分后 cpu 绑定 s≤4.0、hybrid 绑定 copy300/500 s<1.0（绑定消噪在本轮亦复现）。
+
+**绑定路径日志行（G5 原文，per-case `*_numa_r1.log` grep `NUMA|LAUNCH`）**：
+
+```
+A5_COPY_SCHEME_NUMA_FALLBACK node=0 cpus=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=1 cpus=96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=2 cpus=192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,260,261,262,263,264,265,266,267,268,269,270,271,272,273,274,275,276,277,278,279,280,281,282,283,284,285,286,287 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=3 cpus=288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,365,366,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,382,383 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK numactl=missing fallback=sched_setaffinity nodes=0,1,2,3,0,1,2,3
+```
+
+```
+A5_COPY_SCHEME_LAUNCH rank=0 device=npu:0 scheme=cpu seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=1 device=npu:1 scheme=cpu seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=2 device=npu:2 scheme=cpu seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=3 device=npu:3 scheme=cpu seed=7 numa_node=3 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=4 device=npu:4 scheme=cpu seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=5 device=npu:5 scheme=cpu seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=6 device=npu:6 scheme=cpu seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=7 device=npu:7 scheme=cpu seed=7 numa_node=3 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=0 device=npu:0 scheme=cpu seed=7 numa_node=unbound numa_bind=unbound
+A5_COPY_SCHEME_LAUNCH rank=1 device=npu:1 scheme=cpu seed=7 numa_node=unbound numa_bind=unbound
+```
+
+（不绑定 case LAUNCH 行 `numa_node=unbound numa_bind=unbound`，与绑定成对。）
+
+**G0 旧脚本 5 case（蓝图 `results/scatter_copy_a5_c8`，device_count=8）**：
+
+```
+cards8 bs32 copy100 : 170.621 GB/s all_correct=True
+cards8 bs32 copy200 : 166.951 GB/s all_correct=True
+cards8 bs32 copy300 : 165.599 GB/s all_correct=True
+cards8 bs32 copy500 : 164.163 GB/s all_correct=True
+cards8 bs32 copy2048: 163.886 GB/s all_correct=True
+```
+
+**三个 `copy_scheme_timing_summary.md` 全文**：
+
+```
+# results/r6e/npu8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| npu | 0 | 0.5 | overlap | 8 | 32 | 100 | 96.264 | 101.697 | 175.188 |
+| npu | 0 | 0.5 | overlap | 8 | 32 | 200 | 196.038 | 209.202 | 173.021 |
+| npu | 0 | 0.5 | overlap | 8 | 32 | 300 | 301.085 | 313.694 | 167.989 |
+| npu | 0 | 0.5 | overlap | 8 | 32 | 500 | 509.873 | 529.340 | 164.815 |
+| npu | 0 | 0.5 | overlap | 8 | 32 | 2048 | 2116.722 | 2194.793 | 162.826 |
+```
+
+```
+# results/r6e/cpu8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 8 | 32 | 100 | 108.358 | 123.712 | 156.730 |
+| cpu | 0 | 0.5 | overlap | 8 | 32 | 200 | 196.514 | 224.157 | 172.531 |
+| cpu | 0 | 0.5 | overlap | 8 | 32 | 300 | 330.048 | 358.473 | 157.505 |
+| cpu | 0 | 0.5 | overlap | 8 | 32 | 500 | 535.780 | 605.823 | 159.619 |
+| cpu | 0 | 0.5 | overlap | 8 | 32 | 2048 | 3116.242 | 3698.931 | 114.148 |
+```
+
+```
+# results/r6e/hybrid8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| hybrid | 0 | 0.1 | overlap | 8 | 32 | 100 | 165.883 | 184.676 | 102.345 |
+| hybrid | 0 | 0.1 | overlap | 8 | 32 | 200 | 190.060 | 200.218 | 177.059 |
+| hybrid | 0 | 0.1 | overlap | 8 | 32 | 300 | 282.019 | 300.378 | 179.659 |
+| hybrid | 0 | 0.1 | overlap | 8 | 32 | 500 | 467.957 | 496.251 | 180.210 |
+| hybrid | 0 | 0.1 | overlap | 8 | 32 | 2048 | 1961.702 | 2040.413 | 175.765 |
+```
+
+**三个 `copy_scheme_run_manifest.json` 全文**：
+
+```json
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T08:37:35.072161+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "npu_cards8_bs32_copy100_rf0p0_r1.json",
+    "npu_cards8_bs32_copy100_rf0p0_r2.json",
+    "npu_cards8_bs32_copy100_rf0p0_r3.json",
+    "npu_cards8_bs32_copy200_rf0p0_r1.json",
+    "npu_cards8_bs32_copy200_rf0p0_r2.json",
+    "npu_cards8_bs32_copy200_rf0p0_r3.json",
+    "npu_cards8_bs32_copy300_rf0p0_r1.json",
+    "npu_cards8_bs32_copy300_rf0p0_r2.json",
+    "npu_cards8_bs32_copy300_rf0p0_r3.json",
+    "npu_cards8_bs32_copy500_rf0p0_r1.json",
+    "npu_cards8_bs32_copy500_rf0p0_r2.json",
+    "npu_cards8_bs32_copy500_rf0p0_r3.json",
+    "npu_cards8_bs32_copy2048_rf0p0_r1.json",
+    "npu_cards8_bs32_copy2048_rf0p0_r2.json",
+    "npu_cards8_bs32_copy2048_rf0p0_r3.json"
+  ]
+}
+```
+
+```json
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T08:47:58.329920+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs32_copy100_rf0p0_cf0p1_overlap_numa_r3.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs32_copy200_rf0p0_cf0p1_overlap_numa_r3.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs32_copy300_rf0p0_cf0p1_overlap_numa_r3.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs32_copy500_rf0p0_cf0p1_overlap_numa_r3.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs32_copy2048_rf0p0_cf0p1_overlap_numa_r3.json"
+  ]
+}
+```
+
+```json
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T08:41:10.815881+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "cpu_cards8_bs32_copy100_rf0p0_r1.json",
+    "cpu_cards8_bs32_copy100_rf0p0_r2.json",
+    "cpu_cards8_bs32_copy100_rf0p0_r3.json",
+    "cpu_cards8_bs32_copy200_rf0p0_r1.json",
+    "cpu_cards8_bs32_copy200_rf0p0_r2.json",
+    "cpu_cards8_bs32_copy200_rf0p0_r3.json",
+    "cpu_cards8_bs32_copy300_rf0p0_r1.json",
+    "cpu_cards8_bs32_copy300_rf0p0_r2.json",
+    "cpu_cards8_bs32_copy300_rf0p0_r3.json",
+    "cpu_cards8_bs32_copy500_rf0p0_r1.json",
+    "cpu_cards8_bs32_copy500_rf0p0_r2.json",
+    "cpu_cards8_bs32_copy500_rf0p0_r3.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_r1.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_r2.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_r3.json",
+    "cpu_cards8_bs32_copy100_rf0p0_numa_r1.json",
+    "cpu_cards8_bs32_copy100_rf0p0_numa_r2.json",
+    "cpu_cards8_bs32_copy100_rf0p0_numa_r3.json",
+    "cpu_cards8_bs32_copy200_rf0p0_numa_r1.json",
+    "cpu_cards8_bs32_copy200_rf0p0_numa_r2.json",
+    "cpu_cards8_bs32_copy200_rf0p0_numa_r3.json",
+    "cpu_cards8_bs32_copy300_rf0p0_numa_r1.json",
+    "cpu_cards8_bs32_copy300_rf0p0_numa_r2.json",
+    "cpu_cards8_bs32_copy300_rf0p0_numa_r3.json",
+    "cpu_cards8_bs32_copy500_rf0p0_numa_r1.json",
+    "cpu_cards8_bs32_copy500_rf0p0_numa_r2.json",
+    "cpu_cards8_bs32_copy500_rf0p0_numa_r3.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_numa_r1.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_numa_r2.json",
+    "cpu_cards8_bs32_copy2048_rf0p0_numa_r3.json"
+  ]
+}
+```
+
+**`repeat_spread.py` 全部输出原文**：
+
+```
+# results/r6e/npu8
+coordinate                                    n      mean      std  spread%  runs
+npu/0.0/0.5/overlap/8/32/100/100              3   175.188    3.305    3.43%  173.06 179.00 173.50
+npu/0.0/0.5/overlap/8/32/200/200              3   173.021    3.558    3.89%  175.53 168.95 174.59
+npu/0.0/0.5/overlap/8/32/300/300              3   167.989    4.371    5.04%  166.41 172.93 164.63
+npu/0.0/0.5/overlap/8/32/500/500              3   164.815    1.252    1.53%  164.73 163.61 166.11
+npu/0.0/0.5/overlap/8/32/2048/2048            3   162.826    3.400    3.85%  160.56 161.18 166.74
+
+# results/r6e/cpu8
+coordinate                                    n      mean      std  spread%  runs
+cpu/0.0/0.5/overlap/8/32/100/100              6   156.730   10.075   20.57%  150.15 159.91 154.31 173.27 159.02 143.71  <-- UNSTABLE
+cpu/0.0/0.5/overlap/8/32/200/200              6   172.531    4.234    6.47%  172.38 178.57 170.37 176.59 169.56 167.72
+cpu/0.0/0.5/overlap/8/32/300/300              6   157.505   24.080   51.24%  172.47 175.58 167.10 140.44 116.10 173.33  <-- UNSTABLE
+cpu/0.0/0.5/overlap/8/32/500/500              6   159.619    7.980   15.05%  163.59 145.93 164.97 159.95 167.90 155.38  <-- UNSTABLE
+cpu/0.0/0.5/overlap/8/32/2048/2048            6   114.148    6.408   16.37%  119.21 112.09 114.09 118.47 118.58 102.44  <-- UNSTABLE
+
+# results/r6e/hybrid8
+coordinate                                    n      mean      std  spread%  runs
+hybrid/0.0/0.1/overlap/8/32/100/100           6   102.345    8.562   28.51%  99.13 101.22 100.59 106.62 116.14 90.37  <-- UNSTABLE
+hybrid/0.0/0.1/overlap/8/32/200/200           6   177.059    2.549    3.92%  173.88 174.51 178.64 177.44 177.18 180.70
+hybrid/0.0/0.1/overlap/8/32/300/300           6   179.659    5.333    8.00%  181.38 182.04 182.32 182.24 168.81 181.16
+hybrid/0.0/0.1/overlap/8/32/500/500           6   180.210    2.459    3.52%  181.42 181.53 183.58 179.87 177.52 177.34
+hybrid/0.0/0.1/overlap/8/32/2048/2048         6   175.765    3.354    5.27%  173.59 177.28 177.84 180.57 171.54 173.78
+```
+
+**数据出处**：results/r6e/ 下 npu8、cpu8、hybrid8 三目录（21 上，gitignore 不入库）+ run_r6e_old/npu/cpu/hybrid.log + run_r6e_spread.log；阶段 RC 全 0（STAGE_G0/A/B/C/SPREAD_RC=0）。commit 回填见 history.md。
+
 ---
 
 ## §R6d-旧 派单：新旧带宽测试同机同轮对账（2026-10-15，蓝区）（取消：未交付，用户优先 bs32 直接对比；新旧对账缩为 §R6e G0 迷你组，bs24 对账不做）
