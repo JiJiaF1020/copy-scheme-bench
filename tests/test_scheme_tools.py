@@ -28,9 +28,9 @@ import scheme_churn_synth  # noqa: E402
 import scheme_report  # noqa: E402
 import scheme_workload as wl  # noqa: E402
 import test_scheme_worker  # noqa: E402
-from run_scheme_multiprocess import numactl_nodes  # noqa: E402
+from run_scheme_multiprocess import numa_command, numactl_nodes  # noqa: E402
 from run_scheme_multiprocess import parse_args as runner_parse_args  # noqa: E402
-from scheme_config import MANIFEST_NAME, MULTIPROCESS_TEST, NUMA_ENV, SINGLE_TEST  # noqa: E402
+from scheme_config import MANIFEST_NAME, MULTIPROCESS_TEST, NUMA_ENV, NUMA_FALLBACK_ENV, SINGLE_TEST  # noqa: E402
 
 BLOCK = 128
 
@@ -481,6 +481,15 @@ class RunnerCliTests(unittest.TestCase):
         with patch.dict(os.environ, {NUMA_ENV: ""}, clear=True):
             self.assertEqual(numactl_nodes([0]), [])
 
+    def test_numa_command_numactl_vs_affinity_fallback(self):
+        wrapped, env = numa_command(["python", "w.py"], "3", use_numactl=True)
+        self.assertEqual(wrapped[:3], ["numactl", "--cpunodebind=3", "--membind=3"])
+        self.assertEqual(wrapped[3:], ["python", "w.py"])
+        self.assertIsNone(env)
+        wrapped, env = numa_command(["python", "w.py"], "3", use_numactl=False)
+        self.assertEqual(wrapped, ["python", "w.py"])
+        self.assertEqual(env, {NUMA_FALLBACK_ENV: "3"})
+
     def test_runner_aggregates_simulated_workers(self):
         import run_scheme_multiprocess as runner
         commands = []
@@ -549,6 +558,33 @@ class WorkerCliTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     test_scheme_worker.validate_scheme_args(test_scheme_worker.parse_args(bad))
+
+    def test_parse_cpulist(self):
+        self.assertEqual(test_scheme_worker.parse_cpulist("0-3,8,10-11\n"),
+                         {0, 1, 2, 3, 8, 10, 11})
+        self.assertEqual(test_scheme_worker.parse_cpulist("5"), {5})
+        self.assertEqual(test_scheme_worker.parse_cpulist(""), set())
+
+    def test_node_cpulist_reads_sysfs_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            node_dir = Path(directory) / "node3"
+            node_dir.mkdir()
+            (node_dir / "cpulist").write_text("24-27\n", encoding="utf-8")
+            self.assertEqual(test_scheme_worker._node_cpulist("3", Path(directory)),
+                             {24, 25, 26, 27})
+
+    def test_apply_numa_fallback_noop_without_env(self):
+        with patch.dict(os.environ, {}, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertIsNone(test_scheme_worker.apply_numa_fallback())
+        self.assertEqual(out.getvalue(), "")
+
+    def test_apply_numa_fallback_binds_affinity(self):
+        with patch.dict(os.environ, {NUMA_FALLBACK_ENV: "3"}, clear=True), \
+                patch.object(test_scheme_worker.os, "sched_setaffinity", create=True) as bind, \
+                patch.object(test_scheme_worker, "_node_cpulist", return_value={24, 25, 26, 27}):
+            test_scheme_worker.apply_numa_fallback()
+        bind.assert_called_once_with(0, {24, 25, 26, 27})
 
 
 if __name__ == "__main__":

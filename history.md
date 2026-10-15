@@ -12,6 +12,24 @@
 **判读**（蓝区）：<阳性/阴性/无效 + 依据 + 下一步>
 ```
 
+## §R6b NUMA 归因裁决（numactl 缺失修复版）（2026-10-15）
+
+**派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
+§R6 阻塞于前置核验第 4 条（work21 无 numactl，绿区口头回传，无交付
+commit）。蓝区不修环境、改代码兜底：numactl 缺失时 runner 经
+`SCATTER_C8_NUMA_FALLBACK=<node>` 传节点号，worker 在 DRAM 镜像/staging
+池分配前 `os.sched_setaffinity` 绑定该节点 cpulist，first-touch 等效
+membind；numactl 存在时仍走原路径。改动：tests/scheme_config.py
+（NUMA_FALLBACK_ENV）、tests/run_scheme_multiprocess.py（which 探测 +
+numa_command + 日志/JSON 记 numa_bind）、tests/test_scheme_worker.py
+（parse_cpulist/_node_cpulist/apply_numa_fallback，main 早期调用）。
+自检 41→46 项全绿；23 case dry-run 复核一致（12/8/3，results 前缀
+r6b）。通过标准 R6b-G1..G5 与判读预案（照录 §R6 六条）见 pingpong.md
+§R6b。同轮蓝区交付分析报告 drafts/noise_attribution_r5.md（R5 噪声
+归因：排除项 + NUMA 落点抽签三方证据链 + +26% 来历）。
+**交付**（commit 本轮 push 后回填）：
+**判读**：待交付后蓝区填写。
+
 ## §R6 NUMA 归因实锤 + 绑定修复验证（2026-10-15）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：

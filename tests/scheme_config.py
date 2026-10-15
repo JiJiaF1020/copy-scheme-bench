@@ -11,6 +11,10 @@ HYBRID_MODES = ("serial", "overlap")
 # Per-rank NUMA binding list, one node per selected device (same convention as
 # the blueprint runner so both suites share run scripts and muscle memory).
 NUMA_ENV = "SCATTER_C8_NUMA_NODES"
+# Runner-to-worker handoff when numactl is absent on the host: the worker binds
+# its own CPU affinity to the node's cpulist before allocating, so first-touch
+# places the pool pages on that node (approximates --cpunodebind/--membind).
+NUMA_FALLBACK_ENV = "SCATTER_C8_NUMA_FALLBACK"
 # Build tag recorded into every result JSON; set by tools/build_queue_depth.sh
 # (or by hand) so queue-depth rebuilds are traceable in the reports.
 QUEUE_DEPTH_ENV = "SCATTER_C8_QUEUE_DEPTH"

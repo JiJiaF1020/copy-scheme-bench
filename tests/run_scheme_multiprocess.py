@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ from _common import ROW_BYTES, add_case_args, validate_args, write_json  # noqa:
 from scatter_cli import add_device_args, resolve_copy_count, selected_devices, validate_workload  # noqa: E402
 from scatter_results import copy_label, print_result, summarize_devices  # noqa: E402
 
-from scheme_config import MULTIPROCESS_TEST, NUMA_ENV, RESULTS_SUBDIR, SINGLE_TEST  # noqa: E402
+from scheme_config import MULTIPROCESS_TEST, NUMA_ENV, NUMA_FALLBACK_ENV, RESULTS_SUBDIR, SINGLE_TEST  # noqa: E402
 from test_scheme_worker import add_scheme_args, validate_scheme_args  # noqa: E402
 
 
@@ -90,9 +91,24 @@ def numactl_nodes(devices: list[int]) -> list[str]:
     return nodes
 
 
+def numa_command(command: list[str], node: str, use_numactl: bool) -> tuple[list[str], dict | None]:
+    """Wrap the worker command for NUMA node `node`.
+
+    With numactl: prefix the command. Without it: hand the node to the worker
+    through NUMA_FALLBACK_ENV so it binds its own affinity before allocating.
+    """
+    if use_numactl:
+        return ["numactl", f"--cpunodebind={node}", f"--membind={node}"] + command, None
+    return command, {NUMA_FALLBACK_ENV: node}
+
+
 def run_workers(args: argparse.Namespace, devices: list[int]) -> list[dict]:
     worker = Path(__file__).with_name("test_scheme_worker.py")
     numa_nodes = numactl_nodes(devices)
+    use_numactl = bool(numa_nodes) and shutil.which("numactl") is not None
+    if numa_nodes and not use_numactl:
+        print("A5_COPY_SCHEME_NUMA_FALLBACK numactl=missing "
+              f"fallback=sched_setaffinity nodes={','.join(numa_nodes)}", flush=True)
     with tempfile.TemporaryDirectory(prefix="a5_copy_scheme_") as name:
         temp = Path(name)
         start_file, timing_start_file = temp / "start", temp / "timing_start"
@@ -121,12 +137,17 @@ def run_workers(args: argparse.Namespace, devices: list[int]) -> list[dict]:
                     command.append("--pretouch")
                 if args.allow_non_a5:
                     command.append("--allow-non-a5")
+                env = None
+                numa_bind = "unbound"
                 if numa_nodes:
-                    node = numa_nodes[rank]
-                    command = ["numactl", f"--cpunodebind={node}", f"--membind={node}"] + command
+                    command, extra_env = numa_command(command, numa_nodes[rank], use_numactl)
+                    if extra_env is not None:
+                        env = dict(os.environ, **extra_env)
+                    numa_bind = "numactl" if use_numactl else "affinity_fallback"
                 print(f"A5_COPY_SCHEME_LAUNCH rank={rank} device=npu:{device} scheme={args.scheme} "
-                      f"seed={seed} numa_node={numa_nodes[rank] if numa_nodes else 'unbound'}", flush=True)
-                processes.append((rank, subprocess.Popen(command), result_file))
+                      f"seed={seed} numa_node={numa_nodes[rank] if numa_nodes else 'unbound'} "
+                      f"numa_bind={numa_bind}", flush=True)
+                processes.append((rank, subprocess.Popen(command, env=env), result_file))
             wait_until_ready(initial_ready, processes, "initialization")
             start_file.write_text("start\n", encoding="utf-8")
             print("A5_COPY_SCHEME_WARMUP_START all_workers_ready=1", flush=True)
@@ -173,6 +194,8 @@ def summarize(args: argparse.Namespace, devices: list[int], per_device: list[dic
             "hybrid_mode": args.hybrid_mode, "cpu_threads": args.cpu_threads,
             "pretouch": bool(args.pretouch), "window": args.window,
             "numa_nodes": os.environ.get(NUMA_ENV, ""),
+            "numa_bind": ("none" if not os.environ.get(NUMA_ENV, "").strip()
+                          else "numactl" if shutil.which("numactl") else "affinity_fallback"),
         },
         "summary": {
             **summarize_devices(per_device),

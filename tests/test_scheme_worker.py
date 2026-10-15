@@ -31,8 +31,8 @@ from scatter_cli import resolve_copy_count  # noqa: E402
 from scatter_results import copy_label, print_result  # noqa: E402
 
 import scheme_workload as wl  # noqa: E402
-from scheme_config import (DEFAULT_QUEUE_DEPTH, HYBRID_MODES, QUEUE_DEPTH_ENV,  # noqa: E402
-                           SCHEMES, SINGLE_TEST)
+from scheme_config import (DEFAULT_QUEUE_DEPTH, HYBRID_MODES, NUMA_FALLBACK_ENV,  # noqa: E402
+                           QUEUE_DEPTH_ENV, SCHEMES, SINGLE_TEST)
 
 POISON = 65
 
@@ -77,6 +77,46 @@ class Case:
     staging_npu: "torch.Tensor | None"
     staging_pinned: bool
     side_stream: "torch.npu.Stream | None"
+
+
+def parse_cpulist(text: str) -> set[int]:
+    """sysfs cpulist syntax: "0-3,8,10-11" -> {0,1,2,3,8,10,11}."""
+    cpus = set()
+    for part in text.strip().split(","):
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            cpus.update(range(int(lo), int(hi) + 1))
+        else:
+            cpus.add(int(part))
+    return cpus
+
+
+def _node_cpulist(node: str, sys_root: Path = Path("/sys/devices/system/node")) -> set[int]:
+    return parse_cpulist((sys_root / f"node{node}" / "cpulist").read_text(encoding="utf-8"))
+
+
+def apply_numa_fallback() -> None:
+    """numactl-free NUMA stand-in, driven by the runner via NUMA_FALLBACK_ENV.
+
+    Binding this process to the node's cpulist before the DRAM mirror and
+    staging pools are allocated makes first-touch land their pages on that
+    node, approximating numactl --cpunodebind/--membind for this benchmark.
+    """
+    node = os.environ.get(NUMA_FALLBACK_ENV, "").strip()
+    if not node:
+        return
+    if not hasattr(os, "sched_setaffinity"):
+        print(f"A5_COPY_SCHEME_NUMA_FALLBACK node={node} bound=0 reason=unsupported_platform",
+              flush=True)
+        return
+    cpus = _node_cpulist(node)
+    if not cpus:
+        raise RuntimeError(f"NUMA fallback node {node}: empty cpulist in sysfs")
+    os.sched_setaffinity(0, cpus)
+    print(f"A5_COPY_SCHEME_NUMA_FALLBACK node={node} "
+          f"cpus={','.join(str(cpu) for cpu in sorted(cpus))} bound=1", flush=True)
 
 
 def add_scheme_args(parser: argparse.ArgumentParser) -> None:
@@ -569,6 +609,9 @@ def run(args: argparse.Namespace) -> dict:
 def main() -> None:
     args = parse_args()
     validate_scheme_args(args)
+    # Must run before torch init and before run() allocates the DRAM mirror /
+    # staging pools, so first-touch places those pages on the requested node.
+    apply_numa_fallback()
     global torch, torch_npu, vllm_dsa_a5, require_a5, swapped_from_cpu
     # Select the blueprint checkout's OPP before torch_npu initializes.
     import vllm_dsa_a5
