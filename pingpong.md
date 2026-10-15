@@ -33,113 +33,223 @@ vLLM 集成决策的带宽对比数据。
 - 对比只在**同机、同轮、同 cards/bs/copy 坐标**之间有效；跨机器/跨会话绝对值不可比。
 - 正确性门槛先于性能：任何 case 的 correctness 非全 true，该 case 数据无效。
 
----
 
-## §R6c 派单：S2 cards8 原坐标裁决 + fallback 路径首验（2026-10-15，蓝区）
 
-### 目标
+### 交付（§R6c，2026-10-15，绿区）
 
-R6b 实锤 NUMA（cards4 绑定 +11.97%，增益落 gather 段 -19.7%），但 S2 升级
-判据因降卡（13 机仅 4 节点）不可判。本轮回 **21（R5 噪声原地）** 跑 cards8
-原坐标：(a) S2 裁决——hybrid cf0.1 cards8 绑定态极差 ≤10% 且折叠带宽 ≥
-同轮 anchor8 ×1.05 ⇒ 强阳性解冻；(b) 抽签复现裁决——cpu cards8 不绑定态
-复现 R5 式抽签（极差 >15%）且绑定态消噪（≤10%）；(c) 21 无 numactl ⇒
-首验 worker sched_setaffinity 兜底路径（R6b 代码修复的实战检验）。
 
-### 前置核验
+**执行环境**：141.61.33.21（work21，主仓原地）。8 卡 Health=Warning + HBM 占用（Util 0%），R1-R5 同状态可跑；**numactl missing**（`which numactl` rc=1）→ **sched_setaffinity fallback 兜底路径首验**；`/proc/sys/kernel/numa_balancing`=**1**（21 特有，13 为 0，判读注意）；NUMA 4 节点（node0 0-95/node1 96-191/node2 192-287/node3 288-383）。拓扑：`NODES='0 1 2 3'` `NN=4` `CYCLE='--numa-cycle'`（NN=4<8 → A/B 组 cards 8 不变，rank→nodes[rank%4] 循环映射，**rank4/5/6/7 与 rank0/1/2/3 共享 node0/1/2/3**——共享节点带宽上限受节点内控制器共享影响，判读标注，不与 NN≥8 形态混比）。
 
-1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「R6c: §R6c 派单」。
-2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
-   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
-   显示 `= 8`；未重编。
-3. 四环境变量（ASCEND_CUSTOM_OPP_PATH / NANOVLLM_A5_INSTALL_OPP_PATH /
-   NANOVLLM_CUST_OPAPI_LIB / SCATTER_C8_NUMA_NODES）grep 无匹配。
-4. `which numactl || echo missing` 回传（预期 missing → 兜底路径；存在则
-   numactl 原路径，两条路径均已验证，不阻塞）。
-5. 在 21 执行。若 21 被占用/不可用：改 13/glm_52 容器执行并在交付注明
-   （13 为 numactl 路径，判读口径不变，标注跨机）。
+**执行链**：
+- R6c-G1：自检末两行 `Ran 47 tests` / `OK` ✓
+- R6c-G2：三 manifest 全 `passed` + 17 case 全 passed + correctness 全 true（per_device 层 data_exact/guard_unchanged/zero_count/...）+ window==16 + hybrid cpu_frac==0.1（r6c_verify bad=0，G2 ALL PASS）✓
+- R6c-G3：拓扑取证——NODES='0 1 2 3'、NN=4、CYCLE='--numa-cycle'；cpulist node0 0-95 / node1 96-191 / node2 192-287 / node3 288-383；numa_balancing=1；which numactl → missing（rc=1）✓
+- R6c-G4（非门槛）：anchor8 折叠 **168.512** vs §R5 171.343 = **-1.65%**（≤15%，21 同机可比）✓
+- R6c-G5：fallback 路径日志行（runner 级 + 每 worker bound=1 + LAUNCH 行 numa_bind=affinity_fallback）与 JSON `config.numa_bind=affinity_fallback` 一致（cpu8 绑定 3/3、hybrid8 绑定 4/4 全一致）✓
 
-### 执行命令
+**关键实测（折叠带宽 `summary.avg_bandwidth`，极差=(max-min)/min，绑定/不绑定按文件名 `_numa` 拆分）**：
 
-```bash
-cd /home/h2d_test/copy-scheme-bench && git pull --ff-only
-cd tests && python3 test_scheme_tools.py && cd ..
+| 组 | 绑定均值 | 绑定极差 | 不绑定均值 | 不绑定极差 | 绑定 vs 不绑定 |
+|---|---|---|---|---|---|
+| numa_cpu8 | 170.603 | 9.53% | 138.285 | 28.98% | **+23.37%** |
+| numa_hybrid8 | 180.019 | 0.99% | 168.721 | 19.24% | **+6.70%** |
+| anchor8 | 168.512 | 0.37% | - | - | - |
 
-which numactl || echo numactl-missing
-ls /sys/devices/system/node/ | grep '^node' | sed 's/^node//' | tr '\n' ' '
-cat /sys/devices/system/node/node*/cpulist
-cat /proc/sys/kernel/numa_balancing
+per-run 明细（GB/s）：
+- numa_cpu8 bind: 180.864 / 165.816 / 165.129（avg_us 224.517）；unbind: 160.718 / 129.532 / 124.605（avg_us 285.137）
+- numa_hybrid8 bind: 180.099 / 179.934 / 180.907 / 179.133（avg_us 210.027）；unbind: 180.024 / 164.111 / 150.977 / 179.771（avg_us 229.742）
+- anchor8: 168.821 / 168.202 / 168.512（avg_us 224.449）
 
-NODES=$(ls /sys/devices/system/node/ | grep '^node' | sed 's/^node//' | tr '\n' ' ' | sed 's/ *$//')
-NN=$(ls /sys/devices/system/node/ | grep -c '^node')
-if [ "$NN" -ge 8 ]; then CYCLE=""; else CYCLE="--numa-cycle"; fi
-echo "NODES='$NODES' NN=$NN CYCLE='$CYCLE'"
+**判读输入（绿区只给原始数据与判据比对，结论留蓝区）**：
+- **抽签复现裁决输入**：numa_cpu8 不绑定态极差 **28.98% >15%** ✓（R5 噪声原坐标复现）且绑定态极差 **9.53% ≤10%** ✓ ⇒ 两条件同时满足。
+- **S2 升级判据输入**：numa_hybrid8 绑定态极差 **0.99% ≤10%** ✓；绑定折叠 **180.019** vs anchor8 168.512×1.05=**176.938** ⇒ 180.019 **≥176.938**（≥×1.05）✓；且 ≥ anchor8 168.512 ✓。
+- **绑定均值方向**：cpu8 +23.37%、hybrid8 +6.70% 均绑定 ≥ 不绑定 ⇒ 维持「绑定=修复」方向（无反向 >10%）。
+- **fallback 验证**：numactl missing 时日志见 G5 兜底行（见下原文）；JSON config.numa_bind=affinity_fallback + numa_nodes='0,1,2,3,0,1,2,3' 与日志一致。
+- **共享节点标注**：NN=4 循环映射 rank4/5/6/7 共享 node0/1/2/3，绑定态带宽上限受节点内控制器共享影响，不与 NN≥8 形态混比。
 
-bash run_scheme_sweep.sh --schemes cpu --cards 8 --batch-size 24 \
-  --copy-count 300 --window 16 --numa-nodes "$NODES" $CYCLE --repeat 3 \
-  --results-dir results/r6c/numa_cpu8 2>&1 | tee run_r6c_cpu.log
+**绑定路径日志行（G5 原文，`grep -E "NUMA|LAUNCH" run_r6c_*.log`）**：
 
-bash run_scheme_sweep.sh --schemes hybrid --cpu-fracs 0.1 --hybrid-modes overlap \
-  --cards 8 --batch-size 24 --copy-count 300 --window 16 \
-  --numa-nodes "$NODES" $CYCLE --repeat 4 --results-dir results/r6c/numa_hybrid8 \
-  2>&1 | tee run_r6c_hybrid.log
-
-bash run_scheme_sweep.sh --schemes npu --cards 8 --batch-size 24 \
-  --copy-count 300 --window 16 --repeat 3 --results-dir results/r6c/anchor8 \
-  2>&1 | tee run_r6c_anchor.log
-
-python3 tools/repeat_spread.py results/r6c/numa_cpu8 results/r6c/numa_hybrid8 \
-  results/r6c/anchor8 results/r5/confirm8 results/r5/anchor8
 ```
 
-共 17 case（6/8/3，蓝区双分支 dry-run 已核：NN≥8 直映射 nodes[:8]；NN<8
-时 --numa-cycle 循环映射 rank→nodes[rank%NN]，实例 `0,1,2,3,0,1,2,3`）。
-anchor 组不带 --numa-nodes（哨兵不绑定）。新增 `--numa-cycle` 为本轮代码
-变更（run_scheme_sweep.py，自检 46→47）。
 
-### 通过标准
+A5_COPY_SCHEME_NUMA_FALLBACK node=0 cpus=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=1 cpus=96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=2 cpus=192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,260,261,262,263,264,265,266,267,268,269,270,271,272,273,274,275,276,277,278,279,280,281,282,283,284,285,286,287 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK node=3 cpus=288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,365,366,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,382,383 bound=1
+A5_COPY_SCHEME_NUMA_FALLBACK numactl=missing fallback=sched_setaffinity nodes=0,1,2,3,0,1,2,3
 
-- R6c-G1：自检末两行 `Ran 47 tests` / `OK`。
-- R6c-G2：三个 manifest 全 `status=="passed"`；17 个 case JSON 全 passed、
-  correctness 全 true（per_device[i].correctness）；numa 组每坐标不绑定+
-  绑定成对；hybrid 组 `cpu_frac==0.1`、`window==16`。
-- R6c-G3：拓扑取证回传——`NODES=... NN=... CYCLE=...` 回显行、各节点
-  cpulist 原文、numa_balancing 值、which numactl 结果。
-- R6c-G4（非门槛）：anchor8 折叠 vs §R5 171.343 偏差 ≤15%（21 同机时可比；
-  13 执行则仅参考）。
-- R6c-G5：绑定路径日志行回传（兜底路径：runner 级
-  `A5_COPY_SCHEME_NUMA_FALLBACK numactl=missing` + 每 worker
-  `A5_COPY_SCHEME_NUMA_FALLBACK node=<N> cpus=<清单> bound=1`；numactl 路径：
-  LAUNCH 行 `numa_bind=numactl`），结果 JSON `config.numa_bind` 与日志一致。
 
-### 回传格式
+```
+```
 
-同 §R6b：交付模板 + 三个目录 `copy_scheme_timing_summary.md` 全文 +
-三个 manifest 全文 + `repeat_spread.py` 全部输出原文 + 拓扑取证原文 +
-绑定路径日志行（`grep -E "NUMA|LAUNCH" run_r6c_*.log` 原文）+ 2 个 case
-JSON 全文——numa_hybrid8 绑定 r1 与不绑定 r1 各一（看 per-die gather/kernel
-相位对比）。
+A5_COPY_SCHEME_LAUNCH rank=0 device=npu:0 scheme=cpu seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=0 device=npu:0 scheme=hybrid seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=1 device=npu:1 scheme=cpu seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=1 device=npu:1 scheme=hybrid seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=2 device=npu:2 scheme=cpu seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=2 device=npu:2 scheme=hybrid seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=3 device=npu:3 scheme=cpu seed=7 numa_node=3 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=3 device=npu:3 scheme=hybrid seed=7 numa_node=3 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=4 device=npu:4 scheme=cpu seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=4 device=npu:4 scheme=hybrid seed=7 numa_node=0 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=5 device=npu:5 scheme=cpu seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=5 device=npu:5 scheme=hybrid seed=7 numa_node=1 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=6 device=npu:6 scheme=cpu seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=6 device=npu:6 scheme=hybrid seed=7 numa_node=2 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=7 device=npu:7 scheme=cpu seed=7 numa_node=3 numa_bind=affinity_fallback
+A5_COPY_SCHEME_LAUNCH rank=7 device=npu:7 scheme=hybrid seed=7 numa_node=3 numa_bind=affinity_fallback
 
-### 判读预案（派单时写死）
 
-- **抽签复现裁决**：numa_cpu8 不绑定态极差 >15% 且绑定态极差 ≤10% ⇒
-  落点抽签在 R5 原坐标实锤 + 绑定消噪成立。若不绑定态极差 ≤10% ⇒ 21 的
-  R5 噪声已消失/环境相关，如实记录（不推翻 R6b 已实锤的均值差结论）。
-- **S2 升级判据**：numa_hybrid8 绑定态极差 ≤10% 且折叠带宽 ≥ 同轮
-  anchor8 折叠 ×1.05 ⇒ S2 升级**强阳性**，生产形态稿
-  （drafts/production_form_hybrid.md，cf=0.1）解冻进入集成评估；
-  ≥ anchor8 但 < ×1.05 维持弱阳性冻结；< anchor8 翻回阴性。
-- **绑定均值方向**：cpu8/hybrid8 绑定态均值 ≥ 不绑定态 ⇒ 维持
-  「绑定=修复」（R6b 已立）；任一反向 >10% 标注并按「节点负载映射」
-  候选复查（R6b 附带发现）。
-- **fallback 验证**：numactl missing 时日志必须见 G5 所列兜底行；缺行即
-  实现 bug，该 case 数据有效但单独标注。
-- **共享节点标注**：NN<8 走循环映射时两个 worker 共享一个节点，绑定态
-  带宽上限受节点内控制器共享影响，判读时标注，不与 NN≥8 形态混比。
-- 任何 case correctness 失败 ⇒ 该 case 无效（不影响其他坐标判读）。
+```
+
+**2 case JSON（numa_hybrid8 绑定 r1 / 不绑定 r1，config+summary+per_device[0].performance）**：
+- 绑定 r1（hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_numa_r1.json）：bw=180.099、avg_us=210.027、p50=209.995、p99=226.761、phases launch_to_gather_done=172.032 / h2d_scatter_tail=38.566 / kernel_event=202.486；config window=16 cpu_frac=0.1 hybrid_mode=overlap numa_bind=affinity_fallback numa_nodes='0,1,2,3,0,1,2,3'。
+- 不绑定 r1（hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_r1.json）：bw=180.024、avg_us=209.927、p50=204.858、p99=228.841、phases launch_to_gather_done=152.953 / h2d_scatter_tail=52.384 / kernel_event=197.101；config numa_bind=none numa_nodes=''。
+- 注：per_device 仅含 correctness 断言（全 true）；per-die gather/kernel 相位在 per_device[0].performance.phases——r1 单次绑定/不绑定相位相近，差异主要在 r2-r4 稳定性（绑定全落在 179.1-180.9，不绑定 r2/r3 跌至 150.98/164.11）。
+
+**三个 `copy_scheme_timing_summary.md` 全文**：
+
+
+
+```
+
+# results/r6c/numa_cpu8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | 0 | 0.5 | overlap | 8 | 24 | 300 | 254.827 | 309.215 | 154.444 |
+
+```
+
+```
+
+# results/r6c/numa_hybrid8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| hybrid | 0 | 0.1 | overlap | 8 | 24 | 300 | 219.885 | 239.401 | 174.370 |
+
+```
+
+```
+
+# results/r6c/anchor8
+
+| scheme | run_frac | cpu_frac | hybrid_mode | cards | batch_size | copy_count | avg_us_mean | avg_us_max | avg_bandwidth |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| npu | 0 | 0.5 | overlap | 8 | 24 | 300 | 224.449 | 232.899 | 168.512 |
+
+```
+
+
+**三个 `copy_scheme_run_manifest.json` 全文**：
+
+
+
+```
+
+# results/r6c/numa_cpu8/copy_scheme_run_manifest.json
+
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T07:33:29.044004+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "cpu_cards8_bs24_copy300_rf0p0_r1.json",
+    "cpu_cards8_bs24_copy300_rf0p0_r2.json",
+    "cpu_cards8_bs24_copy300_rf0p0_r3.json",
+    "cpu_cards8_bs24_copy300_rf0p0_numa_r1.json",
+    "cpu_cards8_bs24_copy300_rf0p0_numa_r2.json",
+    "cpu_cards8_bs24_copy300_rf0p0_numa_r3.json"
+  ]
+}
+
+```
+
+```
+
+# results/r6c/numa_hybrid8/copy_scheme_run_manifest.json
+
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T07:34:54.223221+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_r1.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_r2.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_r3.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_r4.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_numa_r1.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_numa_r2.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_numa_r3.json",
+    "hybrid_cards8_bs24_copy300_rf0p0_cf0p1_overlap_numa_r4.json"
+  ]
+}
+
+```
+
+```
+
+# results/r6c/anchor8/copy_scheme_run_manifest.json
+
+{
+  "schema_version": 2,
+  "status": "passed",
+  "dtype": "c8",
+  "timestamp_utc": "2026-10-15T07:36:39.976324+00:00",
+  "visible_devices": "0,1,2,3,4,5,6,7",
+  "queue_depth": "default",
+  "case_files": [
+    "npu_cards8_bs24_copy300_rf0p0_r1.json",
+    "npu_cards8_bs24_copy300_rf0p0_r2.json",
+    "npu_cards8_bs24_copy300_rf0p0_r3.json"
+  ]
+}
+
+```
+
+
+**`repeat_spread.py` 输出全文**（run_r6c_spread.log，含 r5 对照）：
+
+```
+
+# results/r6c/numa_cpu8
+coordinate                                    n      mean      std  spread%  runs
+cpu/0.0/0.5/overlap/8/24/300/300              6   154.444   22.324   45.15%  180.86 165.82 165.13 160.72 129.53 124.60  <-- UNSTABLE
+
+# results/r6c/numa_hybrid8
+coordinate                                    n      mean      std  spread%  runs
+hybrid/0.0/0.1/overlap/8/24/300/300           8   174.370   10.973   19.82%  180.10 179.93 180.91 179.13 180.02 164.11 150.98 179.77  <-- UNSTABLE
+
+# results/r6c/anchor8
+coordinate                                    n      mean      std  spread%  runs
+npu/0.0/0.5/overlap/8/24/300/300              3   168.512    0.309    0.37%  168.82 168.20 168.51
+
+# results/r5/confirm8
+coordinate                                    n      mean      std  spread%  runs
+hybrid/0.0/0.1/overlap/8/24/300/300           6   167.849   21.593   43.05%  180.82 126.41 180.16 178.20 161.54 179.97  <-- UNSTABLE
+hybrid/0.0/0.15/overlap/8/24/300/300          6   161.415   22.146   47.81%  162.05 152.45 160.43 183.76 184.78 125.01  <-- UNSTABLE
+hybrid/0.0/0.3/overlap/8/24/300/300           6   164.463   30.908   63.24%  187.23 155.81 191.13 141.65 192.83 118.13  <-- UNSTABLE
+hybrid/0.0/0.4/overlap/8/24/300/300           6   178.175   35.383   58.83%  216.04 182.23 136.79 217.27 178.16 138.56  <-- UNSTABLE
+
+# results/r5/anchor8
+coordinate                                    n      mean      std  spread%  runs
+npu/0.0/0.5/overlap/8/24/300/300              6   171.343    2.150    3.96%  171.78 170.64 174.48 171.76 171.57 167.82
+
+
+```
+
+**数据出处**：results/r6c/{numa_cpu8,numa_hybrid8,anchor8}（gitignore 不入库）+ run_r6c_{cpu,hybrid,anchor,spread}.log + /tmp/run_r6c_wrapper.log。
+
+判读留蓝区（绿区不改码，只回传原始数据）。
 
 ---
-
 ## §R6b-旧 派单：NUMA 归因裁决（numactl 缺失修复版）（2026-10-15，蓝区）（已交付+判读）
 
 ### 与 §R6 的关系
