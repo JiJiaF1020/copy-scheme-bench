@@ -1258,6 +1258,24 @@ anchor8 npu cards8 (repeat3):
 - 结果文件在 13 的 results/r6b/（.gitignore 不入库；13 无 git 远端，21 为交付仓）；日志 run_r6b_cpu.log / run_r6b_hybrid.log / run_r6b_anchor.log。
 - 带宽口径：`effective_bandwidth = payload_bytes/(avg_us×1000)` 每 die、多 die=各 die 速率之和，`payload_bytes=copied_tokens×656`（cards4 copy300 = 3600 token/die）；与 §R5 交付口径一致（r6b case JSON `summary.avg_bandwidth` 已对账）。
 
+### 判读（§R6b，2026-10-15，蓝区）
+
+**裁决 1（NUMA 实锤）：命中**。按派单写死的降卡规则坐标落在 cards4：numa_cpu 绑定态折叠 94.896 vs 不绑定 84.749 = **+11.97% > 10% 阈值**。per-die gather 相位（r1）：绑定 141.69/72.26/70.51/69.34µs vs 不绑定 105.86/93.72/121.88/118.89µs（均值 88.45 vs 110.09，**-19.7%**）——增益确实落在 CPU gather 段，机制归因闭环。cards1 对照 -3.34%（|差|<10%）⇒ 绑定本身无显著开销/收益 ✓。
+
+**裁决 2（落点抽签）：此环境不成立，呈稳定均值差形态**。混聚拆分：cpu cards4 绑定 r1-3 = 89.99/96.92/97.78（极差 8.66% ≤10% ✓），不绑定 = 82.12/88.70/83.43（极差 **8.01%，未达 >15%**）；hybrid cards4 绑定/不绑定拆分极差 1.99%/1.80%。13 机 cards4 的 NUMA 效应是**稳定 -11% 均值惩罚**而非 R5 式 run 级抽签（43~63%）。机制推测：4 节点 × 96 核只跑 4 worker，调度器天然撒开 + numa_balancing=0 ⇒ run 间落点方差小；但 first-touch 池页节点一旦固定、worker 的 8 个 torch 线程跨节点访存 ⇒ 稳定惩罚。R5（21 机 cards8）的强抽签形态留 R6c 在原坐标裁决。
+
+**裁决 3（S2 升级）：本轮不可判**（hybrid 降 cards4 vs anchor8 cards8 坐标不齐，绿区已声明）。辅助事实：hybrid cards4 绑定均值 +0.49%、极差 1.99%——cf0.1 只有 10% 流量过 CPU gather，NUMA 收益被稀释到噪声下，方向自洽；稳定性 ✓。S2 须 cards8 同坐标补测 ⇒ R6c。
+
+**裁决 4（证伪分支）**：不触发（裁决 1 命中）。
+
+**门槛与哨兵**：R6b-G1..G5 全过（自检 46 项、23 case 全 passed/correctness 全 true、拓扑 4 节点 × 96 核 distances 15/20、numa_balancing=0、numactl 原路径 rank→node 一一对应、JSON `config.numa_bind` 与日志一致）。anchor8 167.571 vs §R5 171.343 = -2.20%（跨机仅参考），极差 3.30% 复现 anchor 稳定性。
+
+**附带发现**：绑定态 die 间异质——r1 的 rank0/node0 gather 141.7µs 显著慢于其余三 die（69~72µs）；node0 free 内存最少（22.7GB vs 35~37GB），疑节点驻留负载。绑定把 run 级抽签换成了固定 die 级异质；「按节点空闲/负载选 rank→node 映射」列为优化候选（非门槛）。
+
+**结论**：NUMA 实锤 + 绑定=修复（cards4、numactl 路径，均值 +12%），绑定纳入 cpu/hybrid 正式配置候选（与 pretouch 并列）。S2 未决 ⇒ R6c 回 21（R5 噪声原地）cards8 原坐标复测，首验 sched_setaffinity 兜底路径。队列深度 R7 顺延。
+
+---
+
 ## §R6-旧 派单：NUMA 归因实锤 + 绑定修复验证（2026-10-15，蓝区）（阻塞：numactl 缺失，由 §R6b 取代）
 
 ### 目标

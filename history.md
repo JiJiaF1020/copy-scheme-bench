@@ -27,10 +27,22 @@ numa_command + 日志/JSON 记 numa_bind）、tests/test_scheme_worker.py
 r6b）。通过标准 R6b-G1..G5 与判读预案（照录 §R6 六条）见 pingpong.md
 §R6b。同轮蓝区交付分析报告 drafts/noise_attribution_r5.md（R5 噪声
 归因：排除项 + NUMA 落点抽签三方证据链 + +26% 来历）。
-**交付**（commit 本轮 push 后回填）：
-**判读**：待交付后蓝区填写。
+**交付**（commit 5b4b0ba，绿区，改 13/glm_52 容器执行——13 宿主 torch ABI 不兼容，
+容器内 numactl 在 ⇒ 原路径）：R6b-G1..G5 全过；23 case 全 passed、correctness
+全 true；<NODES>=4 节点 ⇒ A/B 组降 cards4、anchor8 保持 cards8。关键实测：
+numa_cpu cards4 绑定 94.896 vs 不绑定 84.749（**+11.97%**）、cards1 对照
+24.488/25.333（-3.34%）、numa_hybrid cards4 89.538/89.098（+0.49%）、
+anchor8 167.571（极差 3.30%，vs §R5 -2.20% 跨机参考）；混聚拆分极差：
+cpu4 绑定 8.66%/不绑定 8.01%，hybrid4 绑定 1.99%/不绑定 1.80%；per-die
+gather（r1）绑定均值 88.45 vs 不绑定 110.09µs（-19.7%）。拓扑：4 节点 ×
+96 核、distances 15/20、numa_balancing=0。数据出处 13 的 results/r6b/。
+**判读**（蓝区，2026-10-15）：**NUMA 实锤**（cards4 绑定 +11.97% >10%，增益
+落 gather 段）+ **绑定=修复**（纳入正式配置候选，与 pretouch 并列）；
+落点抽签此环境不成立（不绑定极差仅 8.01%，呈稳定均值差）；S2 不可判
+（hybrid cards4 vs anchor8 坐标不齐）⇒ R6c 回 21 cards8 原坐标补测；
+R7 顺延。逐条裁决见 pingpong.md §R6b 判读节。
 
-## §R6 NUMA 归因实锤 + 绑定修复验证（2026-10-15）
+## §R6 NUMA 归因实锤 + 绑定修复验证（2026-10-15）（阻塞：numactl 缺失，由 §R6b 取代，未执行）
 
 **派单**（commit = 本轮 commit，hash 以 `git log --oneline -1` 为准）：
 无代码改动，纯测量轮。R5 判读把 hybrid 噪声机制收窄到 CPU gather 段的
