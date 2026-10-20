@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: §D1 已派单（诊断系列第 1 单，独立于 R 轮编号：同代码异机性能归因诊断——08f0e60 原版 depth=2 在 X 机「很差」的取证定位，X 机 vs 21 对照）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
+- Current owner: **绿区**。Status: §K1 已派单（KVAF/URMA vs KSC/PCIe 同机 H2D 带宽 A/B，656B/token 口径，喂融合裁决）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
 
 ## 0. 目标与口径
 
@@ -32,6 +32,163 @@ vLLM 集成决策的带宽对比数据。
   `performance.phases`。
 - 对比只在**同机、同轮、同 cards/bs/copy 坐标**之间有效；跨机器/跨会话绝对值不可比。
 - 正确性门槛先于性能：任何 case 的 correctness 非全 true，该 case 数据无效。
+
+---
+
+## §K1 派单：KVAF(URMA) vs KSC(PCIe) 同机同会话 H2D 有效带宽 A/B（2026-10-20，蓝区）
+
+> K 系列（KVAF 对比系列）第 1 单，独立于 R/D 编号。本单回答一个问题：
+> 两条搬运路径（KSC=PCIe 核内 MTE / KVAF=UB·URMA 核外 UDMA）的
+> 656B/token 有效 H2D 带宽谁高，喂「KSC/KVAF 融合裁决」的带宽裁决门。
+
+### 目标
+
+同机、同会话、同 payload 坐标下 A/B：
+
+- **A 组（KSC 侧，PCIe）**：本仓 npu 方案（蓝图 scatter_copy kernel，
+  `empty_with_swapped_memory` DRAM 源，核内 MTE 搬运）作同轮 anchor。
+- **B 组（KVAF 侧，URMA）**：0903 仓
+  `csrc/attention/nanovllm_a5_ops/tests/benchmark_kvaf_batch_get.py`，
+  BatchGet（UDMA 引擎经 UB 从 KVAF CPU service 的 DDR 拉取），
+  输出 `payload_gibps`（= active_tokens×656/mean_us）。
+
+payload 坐标对齐：A 组 `--batch-size 24 --copy-count {300,2048}` ⇔
+B 组 `--batch-size 24 --miss-count {300,2048}`，两侧每迭代 payload 同为
+4.7 MB / 32.2 MB（24×copy×656）。**对比只在同机同会话有效。**
+
+### 前置核验（任一不满足就停下，写明卡在哪条，不要自行绕行）
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「K1」；
+   本仓自检：`cd tests && python3 test_scheme_tools.py` 末两行
+   `Ran 47 tests` / `OK`。
+2. 蓝图仓 `git -C ../nanovllm-scatter_copy log --oneline -1` = `bb062d2`；
+   `grep "QUEUE_DEPTH = " csrc/src/kvcache_scatter_copy_c8/op_kernel/vllm_a5_kvcache_scatter_copy_c8.cpp`
+   显示 `= 8`；已有构建产物，**不重编**。
+3. **KVAF 环境定位**（本单关键前置）：找一台同时满足下列条件的 A5 机，
+   记录机器标识（IP/别名）与绝对路径：
+   - `ls /dev/uburma` 存在；
+   - 有 `DSA-offload-KVAF-mtp_xzw_0903` checkout（记录
+     `git log --oneline -1`）；
+   - KVAF `ak_mtp_yq` 构建产物齐：
+     `$KVAF_NPU_BUILD_DIR/bin/kvaf_execute_batch_get_kernels.o`、
+     `.../kvaf_execute_batch_put_kernels.o`、
+     `$KVAF_NPU_BUILD_DIR/python/kvaf/`（KVAF_NPU_BUILD_DIR 默认
+     `<KVAF_ROOT>/build-npu`）；
+   - KVAF CPU service 可起：`$KVAF_CPU_BUILD_DIR/runtime/kvaf_cpu_service`
+     已存在，或可用 `bash scripts/a5_dsa_kvaf_cpu_service.sh` 就地构建
+     （构建过程原文留档）。
+   - **找不到这样的机器 ⇒ 立即停下**，交付中写明候选机器各卡在哪条，
+     蓝区改派（可能转为「请有环境的同学手动执行模板」）。
+4. registration 冒烟（在选定机器上，PYTHONPATH 按需）：
+
+   ```bash
+   python3 -c "import torch, torch_npu, importlib; importlib.import_module('vllm_ascend.a5_dsa_registration'); print(hasattr(torch.ops.nanovllm_dsa, 'kvaf_batch_get_prepare_out'))" \
+   || python3 -c "import torch, torch_npu; import nanovllm_dsa_a5; print(hasattr(torch.ops.nanovllm_dsa, 'kvaf_batch_get_prepare_out'))"
+   ```
+
+   两条都失败 ⇒ 在 0903 仓 `csrc/attention/nanovllm_a5_ops/` 执行
+   `bash build_nanovllm_ops.sh` 构建 standalone registration（构建日志留档），
+   并把该目录的 `torch_extension` 加进 PYTHONPATH 后重试冒烟。
+5. `npu-smi info | head -20` 回传（设备名、健康状态）。
+
+### 执行命令（逐字；路径占位符按选定机器实际替换）
+
+**B0 起 KVAF CPU service**（若已有在跑的 service，跳过启动、记录其
+地址与启动方式）：
+
+```bash
+cd <0903仓>
+bash scripts/a5_dsa_kvaf_cpu_service.sh 2>&1 | tee kvaf_cpu_service_k1.log &
+sleep 5
+ss -ltnp | grep 28999   # 确认监听；端口以实际配置为准
+```
+
+**A 组（KSC/PCIe 同轮 anchor，12 case）**：
+
+```bash
+cd <copy-scheme-bench>
+bash run_scheme_sweep.sh --schemes npu --cards 1 8 --batch-size 24 \
+  --copy-count 300 2048 --repeat 3 \
+  --results-dir results/k1/ksc_pcie 2>&1 | tee run_k1_ksc.log
+```
+
+**B 组（KVAF/URMA 单卡，2 点）**：
+
+```bash
+cd <0903仓>/csrc/attention/nanovllm_a5_ops/tests
+export PYTHONPATH=<KVAF_NPU_BUILD_DIR>/python:<0903仓>/csrc/attention/nanovllm_a5_ops/torch_extension${PYTHONPATH:+:$PYTHONPATH}
+export ASCEND_RT_VISIBLE_DEVICES=0
+for MC in 300 2048; do
+  python3 benchmark_kvaf_batch_get.py --device npu:0 --batch-size 24 \
+    --miss-count $MC --qcap 64 --warmup 20 --iters 500 \
+    --batch-get-kernel <KVAF_NPU_BUILD_DIR>/bin/kvaf_execute_batch_get_kernels.o \
+    --batch-put-kernel <KVAF_NPU_BUILD_DIR>/bin/kvaf_execute_batch_put_kernels.o \
+    --cpu-service-addr 127.0.0.1:28999 \
+    2>&1 | tee kvaf_k1_bs24_miss$MC.log
+done
+```
+
+（qcap=64 → source_capacity=8192 ≥ TOPK 2048；DDR 占用 ≈129 MB，
+远低于 --max-ddr-gib 默认 4.0；miss_count ≤ TOPK=2048 均合法。）
+
+**C 组（可选，不阻塞：UDMA 阶段分解，钉死「payload 走核外 UDMA」证据）**：
+
+```bash
+cd <0903仓>/csrc/attention/nanovllm_a5_ops/tests
+python3 benchmark_lidu_fused_batch_get.py --device npu:0 --batch-size 24 \
+  --miss-counts 300 2048 --warmup 10 --iters 100 \
+  --batch-get-kernel <KVAF_NPU_BUILD_DIR>/bin/kvaf_execute_batch_get_kernels.o \
+  --batch-put-kernel <KVAF_NPU_BUILD_DIR>/bin/kvaf_execute_batch_put_kernels.o \
+  --cpu-service-addr 127.0.0.1:28999 \
+  2>&1 | tee kvaf_k1_lidu_profile.log
+```
+
+C 组参数名若与实际 CLI 不符（`--help` 核对），**不改代码**，按实际 CLI
+调整参数名后在交付中注明；跑不通就跳过并附报错末 30 行。
+
+### 通过标准
+
+- K1-G1：前置核验 1-5 逐项原文回传（含 KVAF 产物路径清单、service
+  监听证据、设备名）。
+- K1-G2：A 组 manifest `status=="passed"`，12 case 全 passed、
+  correctness 全 true。
+- K1-G3：B 组每个 miss 点日志含
+  `KVAF_SUBGRAPH_C_BENCHMARK_CORRECTNESS ok=1`，且 PERF_RESULT 行齐：
+  `batch_get_npu_event`（带 payload_gibps）、
+  `batch_get_call_to_stream_completion`（带 payload_gibps）、
+  `batch_get_submit`、`batch_get_stream_wait`。
+- K1-G4：A/B 两组同机同日执行，回传各组开始/结束时间戳。
+- K1-G5（若 C 组执行）：日志含
+  `LIDU_BATCH_GET_KERNEL_PROFILE_CONTRACT` 行及各 stage 的
+  PERF_RESULT（尤其 `batch_get_kernel_post` /
+  `batch_get_kernel_transfer_window` / `batch_get_kernel_completion_wait`）。
+
+### 回传格式
+
+交付模板 + 前置核验逐项原文 + A 组 `copy_scheme_timing_summary.md` 与
+manifest 全文 + B 组两份日志的 CONFIG 行与全部 PERF_RESULT 行原文 +
+B0 service 启动日志首尾各 20 行 + C 组（若跑）PROFILE_CONTRACT 行与
+stage 表原文。结果文件路径注明（gitignore 不入库的标出）。
+
+### 判读预案（派单时写死，不移动）
+
+- **主对比口径**：单卡。KVAF 侧取 `batch_get_npu_event` 的
+  payload_gibps ×1.0737 换算十进制 GB/s（该脚本报 GiB/s）；KSC 侧取
+  同轮 cards1 折叠 `summary.avg_bandwidth`（十进制 GB/s）。两侧同为
+  NPU event 流水口径、同为 656B/token 有效 payload，可直接比。
+- **KVAF ≥ KSC ×1.2** ⇒ URMA 路径单卡带宽优势实锤，融合裁决倾向
+  「KVAF 为默认后端」。
+- **0.8× ≤ KVAF ≤ 1.2×** ⇒ 两路径带宽同档，带宽不构成决策变量，
+  裁决只看功能面（catalog / prefix cache / P-D 分离 / 远端能力）。
+- **KVAF < KSC ×0.8** ⇒ KVAF 单卡带宽劣势实锤；用 C 组
+  post/transfer_window/completion_wait 分解定位（post 占比高 = 控制面
+  开销主导；transfer_window 长 = 引擎/链路吞吐低），再定优化项。
+- **submit vs 完成分解**：`batch_get_submit`（host 提交耗时）相对
+  `batch_get_call_to_stream_completion` 占比 >30% 时单独标注——说明
+  队列提交本身重，异步收益打折。
+- **cards8 行只留档**：KVAF bench 是单设备 harness，本轮不裁决多卡
+  聚合；A 组 cards8 数字仅作 KSC 侧同轮参考，不与 KVAF 比。
+- 任何点 correctness 失败 ⇒ 该点数据无效（不影响其他坐标判读）。
 
 ---
 

@@ -278,3 +278,18 @@ D1b depth 2→8 单行改重编重跑，喂 R7 队列深度扫描基线）。前
 cards1 差距小 cards8 拉大 ⇒ 共享上游竞争；D1a 恢复 ⇒ host NUMA 跨节点；
 D1b 两机深度收益幅度对比 ⇒ 深度敏感性的环境依赖。R 轮队列编号不变
 （R7 队列深度扫描、R8 门控阈值扫描仍待派）。
+
+## §K1 KVAF(URMA) vs KSC(PCIe) 同机 H2D 带宽 A/B（2026-10-20，蓝区）（K 系列第 1 单，独立于 R/D 编号）
+
+**派单**（commit 本轮 push 后回填）：目标——同机同会话、656B/token 同口径
+A/B 两条搬运路径的有效 H2D 带宽，喂 KSC/KVAF 融合裁决的带宽裁决门。
+A 组 = 本仓 npu 方案（蓝图 scatter_copy，PCIe 核内 MTE）cards1/8 ×
+bs24 × copy{300,2048} × repeat3（12 case，同轮 anchor）；B 组 = 0903 仓
+benchmark_kvaf_batch_get.py（KVAF BatchGet，UB/URMA 核外 UDMA）单卡
+bs24 × miss{300,2048}，取 batch_get_npu_event 的 payload_gibps；C 组可选
+= benchmark_lidu_fused_batch_get.py 的 post/transfer_window/completion_wait
+阶段分解（钉死「bulk payload 走核外 UDMA」的插桩证据）。关键前置：定位
+同时具备 /dev/uburma + 0903 仓 checkout + KVAF ak_mtp_yq 构建产物 +
+kvaf_cpu_service 的 A5 机；找不到则绿区停下回传、蓝区改派。判据写死：
+KVAF ≥ KSC×1.2 ⇒ URMA 优势实锤；0.8~1.2× ⇒ 同档、带宽非决策变量；
+<0.8× ⇒ 劣势，用 C 组分解定位。多卡 KVAF 聚合不在本轮。零代码改动。
