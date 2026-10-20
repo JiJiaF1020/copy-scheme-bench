@@ -281,7 +281,7 @@ D1b 两机深度收益幅度对比 ⇒ 深度敏感性的环境依赖。R 轮队
 
 ## §K1 KVAF(URMA) vs KSC(PCIe) 同机 H2D 带宽 A/B（2026-10-20，蓝区）（K 系列第 1 单，独立于 R/D 编号）
 
-**派单**（commit 本轮 push 后回填）：目标——同机同会话、656B/token 同口径
+**派单**（commit 7621458）：目标——同机同会话、656B/token 同口径
 A/B 两条搬运路径的有效 H2D 带宽，喂 KSC/KVAF 融合裁决的带宽裁决门。
 A 组 = 本仓 npu 方案（蓝图 scatter_copy，PCIe 核内 MTE）cards1/8 ×
 bs24 × copy{300,2048} × repeat3（12 case，同轮 anchor）；B 组 = 0903 仓
