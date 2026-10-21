@@ -307,7 +307,7 @@ KVAF 两点 → KSC 复跑防漂移），绿区逐阶段照做、逐条回传。
 
 ## §K2 URMA(KVAF BatchGet)带宽极限——自包含 bench 版（2026-10-21，蓝区）（取代 §K1b）
 
-**派单**（commit 本轮 push 后回填）：起因——用户澄清「其实就想看走 URMA
+**派单**（commit 07807fe）：起因——用户澄清「其实就想看走 URMA
 的带宽极限」，并要求测试所需全部进公开仓。蓝区新写自包含 bench
 side_kvaf/urma_ceiling_bench.py：直接用 KVAF NpuRuntime.batch_get
 （descriptor 由脚本构造，不经 DSA Prepare 算子），依赖只剩 KVAF NPU
