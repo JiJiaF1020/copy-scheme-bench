@@ -330,3 +330,11 @@ python 3.12.13，SOC_VERSION=ascend950dt_9582 构建，git/cmake/gcc/numactl
 （pull + 设备/驱动//dev/uburma//usr/lib64 挂载清单 + 容器内版本核验
 四行），pingpong §K2 加补充节。镜像内 torch/torch-npu 版本待绿区
 pip show 回传留档；KVAF binding 同环境源码编译，ABI 自洽。无执行数据。
+
+## §K2 补充 2：docker 镜像双 tag（2026-10-21，蓝区）（非测量轮）
+
+用户提出第二个候选 tag。蓝区核 manifest/config：
+`quay.io/ascend/vllm-ascend:v0.27.1rc1-a5-openeuler` 存在 arm64 变体，
+CANN 9.1.0 toolkit + 编译链 + python 3.12.13 + ascend950dt_9582 构建，
+与 v0.23.0.post1 底座一致；差别仅在 vLLM 层（v0.27.1rc1，本测试不用）。
+runbook 1b 改为 IMAGE 变量双 tag 任选，docker run 引用 $IMAGE。无执行数据。

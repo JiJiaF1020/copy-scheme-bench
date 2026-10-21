@@ -59,13 +59,16 @@ python3 -c "import torch, torch_npu; torch.npu.set_device(0); print('NPU-OK')"
 
 ### 1b docker 变体（官方 A5 镜像，可替代阶段 1）
 
-镜像 `quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler`（蓝区已核
-manifest：arm64 变体在、CANN 9.1.0 toolkit + 编译链、git/cmake/gcc 全，
-A5 SOC 构建）。宿主机只需 docker + NPU 驱动 + `/dev/uburma`。
+镜像 `quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler` 或
+`quay.io/ascend/vllm-ascend:v0.27.1rc1-a5-openeuler`（蓝区已核两者
+manifest：均有 arm64 变体、CANN 9.1.0 toolkit + 编译链、git/cmake/gcc，
+A5 SOC 构建；后者 vLLM 更新但为 rc，本测试不用 vLLM 层，两者等效任选）。
+宿主机只需 docker + NPU 驱动 + `/dev/uburma`。
 
 ```bash
+IMAGE=quay.io/ascend/vllm-ascend:v0.27.1rc1-a5-openeuler   # 或 v0.23.0.post1-a5-openeuler
 curl -sI https://quay.io -o /dev/null -w "quay:%{http_code}\n" --max-time 10   # 不通则走裸机路径
-docker pull quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler
+docker pull $IMAGE
 
 DEVS=""; for d in 0 1 2 3 4 5 6 7; do DEVS="$DEVS --device=/dev/davinci$d"; done
 docker run -u root -d --name urma-bench --net=host --ipc=host --shm-size=64g --privileged \
@@ -76,7 +79,7 @@ docker run -u root -d --name urma-bench --net=host --ipc=host --shm-size=64g --p
   -v /usr/local/sbin:/usr/local/sbin \
   -v /usr/lib64:/usr/lib64 \
   -v $BASE:$BASE -w $BASE \
-  quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler sleep infinity
+  $IMAGE sleep infinity
 docker exec -it urma-bench bash
 ```
 
