@@ -319,3 +319,14 @@ tarball；第三方私有代码，不入公开仓）。扫描矩阵：tokens {72
 49152,131072,262144}×{sequential,random}=10 点，每点 ok 校验 + NPU event
 流水计时，报 gibps+gbps。判据写死：极限=sequential 最高档 gbps；仍上升
 ⇒ 加档复测；random 低 >30% 标注随机惩罚；KSC 对照沿用 1.2×/0.8× 三档。
+
+## §K2 补充：docker 变体并入 runbook（2026-10-21，蓝区）（非测量轮）
+
+用户提出官方镜像候选。蓝区核 quay manifest/config：
+`quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler` 存在 arm64 变体，
+CANN 9.1.0 toolkit 装于 /usr/local/Ascend/cann-9.1.0（编译链在 PATH），
+python 3.12.13，SOC_VERSION=ascend950dt_9582 构建，git/cmake/gcc/numactl
+齐 ⇒ 可作阶段 1 的 docker 替代路径。runbook 新增「1b docker 变体」
+（pull + 设备/驱动//dev/uburma//usr/lib64 挂载清单 + 容器内版本核验
+四行），pingpong §K2 加补充节。镜像内 torch/torch-npu 版本待绿区
+pip show 回传留档；KVAF binding 同环境源码编译，ABI 自洽。无执行数据。

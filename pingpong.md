@@ -88,6 +88,14 @@ service 日志首尾各 20 行 + 时间戳。
   沿用 §K1 的 1.2×/0.8× 三档裁决。
 - ok=0 的点数据无效。
 
+### 补充（2026-10-21，蓝区）：docker 变体
+
+官方镜像 `quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler` 经蓝区
+核 manifest 可用（arm64 + CANN 9.1.0 toolkit + 编译链，A5 SOC 构建），
+已作为「阶段 1b docker 变体」并入 runbook：宿主机有 docker 时可替代
+裸机阶段 1，设备/驱动/`/dev/uburma` 挂载清单照 runbook 逐字执行；
+容器内 torch/torch-npu 用镜像自带版本，`pip show` 版本号随交付回传。
+
 ---
 
 ## §K1b-旧 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（由 §K2 取代：用户澄清只关注 URMA 带宽极限；bench 改蓝区自研自包含版，去掉 0903 私有仓/DSA 算子依赖）

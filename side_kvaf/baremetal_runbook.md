@@ -43,7 +43,7 @@ curl -sI https://pypi.org -o /dev/null -w "pypi:%{http_code}\n" --max-time 10
 本机测不了 URMA，停；pypi 不通 → 需要离线 wheel；KVAF 两种供给都不通 → 停，
 向蓝区要供给方式。
 
-## 阶段 1：CANN + python 环境
+## 阶段 1：CANN + python 环境（裸机路径；docker 变体见 1b）
 
 ```bash
 # CANN（已有则跳过安装）：装 home 或 /usr/local 均可
@@ -56,6 +56,42 @@ python3.11 -m venv ~/venv-urma && source ~/venv-urma/bin/activate
 pip install --upgrade pip && pip install torch==2.10.0 torch-npu==2.10.0.post2
 python3 -c "import torch, torch_npu; torch.npu.set_device(0); print('NPU-OK')"
 ```
+
+### 1b docker 变体（官方 A5 镜像，可替代阶段 1）
+
+镜像 `quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler`（蓝区已核
+manifest：arm64 变体在、CANN 9.1.0 toolkit + 编译链、git/cmake/gcc 全，
+A5 SOC 构建）。宿主机只需 docker + NPU 驱动 + `/dev/uburma`。
+
+```bash
+curl -sI https://quay.io -o /dev/null -w "quay:%{http_code}\n" --max-time 10   # 不通则走裸机路径
+docker pull quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler
+
+DEVS=""; for d in 0 1 2 3 4 5 6 7; do DEVS="$DEVS --device=/dev/davinci$d"; done
+docker run -u root -d --name urma-bench --net=host --ipc=host --shm-size=64g --privileged \
+  --device=/dev/davinci_manager --device=/dev/hisi_hdc --device=/dev/ummu \
+  --device=/dev/uburma $DEVS \
+  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+  -v /etc/ascend_install.info:/etc/ascend_install.info \
+  -v /usr/local/sbin:/usr/local/sbin \
+  -v /usr/lib64:/usr/lib64 \
+  -v $BASE:$BASE -w $BASE \
+  quay.io/ascend/vllm-ascend:v0.23.0.post1-a5-openeuler sleep infinity
+docker exec -it urma-bench bash
+```
+
+容器内（后续阶段全在容器里执行，替代阶段 1）：
+
+```bash
+export ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.1.0   # 镜像已装好
+pip show torch torch-npu | grep -E "Name|Version"      # 回传版本,无需重装
+python3 -c "import torch, torch_npu; torch.npu.set_device(0); print('NPU-OK')"
+ldconfig -p | grep -i urma || find /usr -name "liburma.so*" | head -3   # 挂载生效确认
+```
+
+torch/torch-npu 用镜像自带版本即可（KVAF binding 从源码在同环境编译，
+天然自洽）；版本号回传给蓝区留档。kvaf_cpu_service 起在容器内或宿主机
+均可（net=host，127.0.0.1:28999 互通）。
 
 ## 阶段 2：拉代码
 
