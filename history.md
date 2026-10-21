@@ -338,3 +338,13 @@ pip show 回传留档；KVAF binding 同环境源码编译，ABI 自洽。无执
 CANN 9.1.0 toolkit + 编译链 + python 3.12.13 + ascend950dt_9582 构建，
 与 v0.23.0.post1 底座一致；差别仅在 vLLM 层（v0.27.1rc1，本测试不用）。
 runbook 1b 改为 IMAGE 变量双 tag 任选，docker run 引用 $IMAGE。无执行数据。
+
+## §K2 补充 3：KVAF 供给方式明确化（2026-10-21，蓝区）（非测量轮）
+
+绿区反馈卡点：bench 仍依赖 KVAF 仓产物（NPU binding / 两个 kernel .o /
+kvaf_cpu_service）——蓝区确认该依赖不可约（被测对象即 KVAF 引擎本身；
+「自包含」仅去掉 0903 仓/vLLM/DSA 算子/docker 四样）。runbook 阶段 2 改写
+为三选一供给：A=源码 tar 包（开发机 /data/projects/KVAF ak_mtp_yq 打包、
+目标机现编，推荐）；B=产物 tar 包（build-npu/bin + build-npu/python +
+build-cpu/runtime，限开发机与目标机环境一致，可跳过构建）；C=gitcode
+凭据经私有渠道传递（禁入公开仓）。无执行数据。

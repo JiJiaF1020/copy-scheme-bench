@@ -101,10 +101,36 @@ torch/torch-npu 用镜像自带版本即可（KVAF binding 从源码在同环境
 ```bash
 cd $BASE
 git clone https://github.com/JiJiaF1020/copy-scheme-bench.git bench
-# KVAF 二选一：
-#   a) git clone -b ak_mtp_yq --single-branch https://gitcode.com/CacheOS/KVAF.git KVAF   (需凭据)
-#   b) tar xf <KVAF tarball> && mv <解包目录> KVAF
 ```
+
+### KVAF 源码供给（三选一；KVAF 是私有仓，绿区无法自行获取）
+
+**方式 A（推荐，源码包，目标机现编）**：持有 KVAF checkout 的人在开发机执行：
+
+```bash
+# 在开发机（有 /data/projects/KVAF 的那台）：
+cd /data/projects/KVAF && git checkout ak_mtp_yq
+tar czf /tmp/kvaf_ak_mtp_yq_src.tar.gz \
+  --exclude='./build*' --exclude='./.git' \
+  -C /data/projects KVAF
+# scp 到目标机后,目标机:
+mkdir -p $BASE/KVAF && tar xzf kvaf_ak_mtp_yq_src.tar.gz -C $BASE/KVAF --strip-components=1
+```
+
+**方式 B（产物包，跳过阶段 3 构建）**：仅当开发机与目标机环境一致
+（aarch64 + CANN 9.1 + 同 glibc）时可用：
+
+```bash
+# 开发机：
+tar czf /tmp/kvaf_ak_mtp_yq_bin.tar.gz \
+  -C /data/projects/KVAF \
+  build-npu/bin build-npu/python build-cpu/runtime
+# 目标机解包到 $BASE/KVAF/ 下,直接进阶段 4。
+```
+
+**方式 C（gitcode 凭据）**：蓝区把 `GITCODE_USERNAME`/`GITCODE_KEY` 经
+**私有渠道**（不发公开仓、不写 pingpong）告知绿区，绿区：
+`git clone -b ak_mtp_yq --single-branch https://gitcode.com/CacheOS/KVAF.git KVAF`
 
 ## 阶段 3：构建 KVAF（cpu + npu 两个 role)
 
