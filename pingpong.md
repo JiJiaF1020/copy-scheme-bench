@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: §K1 已派单（KVAF/URMA vs KSC/PCIe 同机 H2D 带宽 A/B，656B/token 口径，喂融合裁决）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
+- Current owner: **绿区**。Status: §K1b 已派单（KVAF/URMA vs KSC/PCIe H2D 带宽 A/B，空环境从零搭建版，执行手册 side_kvaf/baremetal_runbook.md，取代 §K1）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,63 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §K1 派单：KVAF(URMA) vs KSC(PCIe) 同机同会话 H2D 有效带宽 A/B（2026-10-20，蓝区）
+## §K1b 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）
+
+> 取代 §K1。起因更新：目标 A5 机是**完全空环境**（无 docker、无 CANN、
+> 无任何仓库），§K1 的「定位已有 KVAF 环境的机器」前提不成立。
+> 本单改为：绿区在空环境从零搭建并执行测量。**执行手册全文 =
+> 本仓 `side_kvaf/baremetal_runbook.md`**，逐阶段照做。
+
+### 目标
+
+与 §K1 完全一致：同机同会话、656B/token 口径，KSC(PCIe) vs KVAF(URMA)
+单卡有效 H2D 带宽，坐标 bs24 × {300, 2048}。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「K1b」。
+2. 目标机跑手册**阶段 0** 的全部核验命令，**逐条原文回传**（含
+   `/dev/davinci*`、`/dev/uburma`、`liburma.so`、CANN 目录、python
+   版本、三个出网探测）。任一 Go/No-Go 不过 ⇒ 停下，写明卡在哪条。
+3. 手册阶段 1-4 的每步通过标准逐条核对（CANN `msopgen`、
+   `NPU-OK`、`[c8_build] torch extension import: OK`、KVAF binding 自检、
+   `ss -ltnp | grep 28999` 监听）。
+
+### 执行命令
+
+手册阶段 3（KSC 两点）→ 阶段 5（KVAF 两点）→ 阶段 6（KSC 复跑防漂移），
+逐字执行。命令中的 `$BASE`/`$ASCEND_HOME_PATH` 等变量按手册开头约定设置。
+
+### 通过标准
+
+- K1b-G1：阶段 0 核验逐条原文；任一 No-Go 即终止并在交付注明。
+- K1b-G2：KSC 两点日志各含 `ok=1` + `A5_KVCACHE_SCATTER_COPY_C8_UT_OK`，
+  六列表完整；复跑一遍同坐标。
+- K1b-G3：KVAF 两点日志各含
+  `KVAF_SUBGRAPH_C_BENCHMARK_CORRECTNESS ok=1`，PERF_RESULT 行齐
+  （`batch_get_npu_event` 带 payload_gibps 为必需）。
+- K1b-G4：所有命令同机同日，回传各阶段起止时间戳。
+- 任何一步构建失败：报错末 30 行原文进交付，停止后续步骤（绿区纪律，
+  不猜修）。
+
+### 回传格式
+
+交付模板 + 阶段 0 全部原文 + 各构建步骤的通过标准证据行 + KSC 四点
+（含复跑）六列表/JSON 摘要 + KVAF 两点 CONFIG 行与全部 PERF_RESULT 行
+原文 + 时间戳。大日志贴路径即可（gitignore 不入库的注明）。
+
+### 判读预案（派单时写死，沿用 §K1 不变）
+
+- KVAF(payload_gibps×1.0737)≥ KSC×1.2 ⇒ URMA 带宽优势实锤。
+- 0.8×~1.2× ⇒ 同档，带宽非决策变量，裁决只看功能面。
+- ≤0.8× ⇒ KVAF 劣势，补跑 lidu fused bench 的 post/transfer_window
+  分解定位。
+- KSC 初跑 vs 复跑同坐标差 >5% ⇒ 机器漂移，该会话数据降权标注。
+- correctness 失败 ⇒ 该点无效。
+
+---
+
+## §K1-旧 派单：KVAF(URMA) vs KSC(PCIe) 同机同会话 H2D 有效带宽 A/B（2026-10-20，蓝区）（由 §K1b 取代：目标机为空环境，前置核验 3 的「已有 KVAF 环境」前提不成立；判读口径被 §K1b 沿用）
 
 > K 系列（KVAF 对比系列）第 1 单，独立于 R/D 编号。本单回答一个问题：
 > 两条搬运路径（KSC=PCIe 核内 MTE / KVAF=UB·URMA 核外 UDMA）的

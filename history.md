@@ -293,3 +293,14 @@ bs24 × miss{300,2048}，取 batch_get_npu_event 的 payload_gibps；C 组可选
 kvaf_cpu_service 的 A5 机；找不到则绿区停下回传、蓝区改派。判据写死：
 KVAF ≥ KSC×1.2 ⇒ URMA 优势实锤；0.8~1.2× ⇒ 同档、带宽非决策变量；
 <0.8× ⇒ 劣势，用 C 组分解定位。多卡 KVAF 聚合不在本轮。零代码改动。
+
+## §K1b KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（取代 §K1）
+
+**派单**（commit 本轮 push 后回填）：起因——用户确认目标 A5 为完全空环境
+（无 docker/CANN/仓库），§K1 前置 3「定位已有 KVAF 环境机器」不成立。
+改派：新增 side_kvaf/baremetal_runbook.md（从零搭建六阶段手册：Go/No-Go
+核验 → CANN9.1+torch2.10/torch-npu2.10.0.post2 → 三仓 clone → KSC
+build_c8+两点 → KVAF cpu/npu 构建+standalone registration+起 service →
+KVAF 两点 → KSC 复跑防漂移），绿区逐阶段照做、逐条回传。测量坐标与
+判读预案沿用 §K1 写死口径（bs24×{300,2048}、656B/token、payload_gibps
+×1.0737 换算、1.2×/0.8× 三档裁决）。零被测代码改动。
