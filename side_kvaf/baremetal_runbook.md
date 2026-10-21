@@ -1,202 +1,131 @@
-# A5 空环境从零搭建：KVAF(URMA) vs KSC(PCIe) H2D 带宽对比 runbook
+# A5 空环境：URMA(KVAF BatchGet)带宽极限测试 runbook
 
-目标：同一台 A5、同会话，测两条搬运路径的 656B/token 有效 H2D 带宽。
-坐标写死：batch-size 24 × 每请求搬运 {300, 2048} token（每迭代 payload 4.7 MB / 32.2 MB）。
-不需要 docker、不需要装 vLLM。每个阶段开头有 Go/No-Go 检查，卡住就停、把输出贴回来。
+目标：测 UB/URMA 路径 DDR→HBM 的**有效带宽极限**（UDMA 引擎，656B/token 口径）。
+bench 为蓝区自研 `side_kvaf/urma_ceiling_bench.py`，只依赖 KVAF NPU binding，
+**不需要** 0903 仓、vLLM、DSA 算子、docker。
 
-约定：下文 `<BASE>` = 你放代码的目录，建议 `/home/$USER/ab_test`：
+## 依赖边界（什么东西从哪来）
+
+| 内容 | 来源 | 公开? |
+|---|---|---|
+| 本手册 + bench 脚本 | `copy-scheme-bench`（github） | 公开 |
+| torch 2.10.0 / torch-npu 2.10.0.post2 | pypi | 公开 |
+| CANN 9.1 toolkit(.run 安装包） | 内部镜像/官网 | 公开但体积大，不入仓 |
+| KVAF 运行时源码（ak_mtp_yq 分支） | gitcode `CacheOS/KVAF` | **私有**，需凭据 clone 或用户直接放 tarball 到机器上 |
+
+除 KVAF 源码供给外全链路自包含。KVAF 是第三方私有代码，**不要**拷进公开仓。
+
+约定 `<BASE>` 为工作目录：
 
 ```bash
-export BASE=/home/$USER/ab_test && mkdir -p $BASE && cd $BASE
+export BASE=/home/$USER/urma_test && mkdir -p $BASE && cd $BASE
 ```
 
 ---
 
-## 阶段 0：Go/No-Go 核验（5 分钟，不过就别往下走）
+## 阶段 0：Go/No-Go 核验（逐条原文回传）
 
 ```bash
 uname -m                                  # 期望 aarch64
-cat /etc/os-release | head -3
-npu-smi info | head -20                   # 期望看到 8×Ascend950；没有 => 驱动没装,停
-ls /dev/davinci* | head                   # 期望 davinci0..7 + davinci_manager
-ls /usr/local/Ascend/                     # 看有没有 cann / ascend-toolkit
-python3.11 --version || python3 --version # 期望 3.11.x
-ls /dev/uburma                            # 【KVAF 生死线】不存在 => KVAF 侧在这台机器跑不了
+npu-smi info | head -20                   # 8×Ascend950；没有 => 驱动没装,停
+ls /dev/davinci* | head
+ls /usr/local/Ascend/ 2>/dev/null || ls $HOME/Ascend/ 2>/dev/null
+ls /dev/uburma                            # 【生死线】没有 => URMA 路径不存在,停
 ldconfig -p 2>/dev/null | grep -i urma || find /usr -name "liburma.so*" 2>/dev/null | head -3
-curl -sI https://github.com -o /dev/null -w "github:%{http_code}\n" --max-time 10
-curl -sI https://gitcode.com -o /dev/null -w "gitcode:%{http_code}\n" --max-time 10
+python3.11 --version || python3 --version
 curl -sI https://pypi.org -o /dev/null -w "pypi:%{http_code}\n" --max-time 10
+# KVAF 供给方式二选一，确认哪种可行：
+#   a) gitcode 凭据 clone: GIT_TERMINAL_PROMPT=0 git ls-remote https://gitcode.com/CacheOS/KVAF.git
+#   b) 用户已把 KVAF tarball 放到机器上: ls <tarball路径>
 ```
 
-判读：
-- `/dev/davinci*` 没有 → NPU 驱动未装，超出手册范围，找机器管理员。
-- `/dev/uburma` 或 `liburma.so` 没有 → **KVAF 侧无法在这台机器测**（UB/URMA 是硬依赖，装不了就换有 UB 的机器；KSC 侧仍可测）。
-- 不出网 → 需要离线包/内部镜像，把缺什么列出来贴回来。
-- CANN 目录不存在 → 阶段 1 装；存在则跳过安装只做 source。
+判读：`/dev/davinci*` 缺 → 找管理员装驱动；`/dev/uburma` 或 `liburma.so` 缺 →
+本机测不了 URMA，停；pypi 不通 → 需要离线 wheel；KVAF 两种供给都不通 → 停，
+向蓝区要供给方式。
 
----
-
-## 阶段 1：基础软件（CANN + python 包）
-
-### 1.1 CANN 9.1（已有则跳过安装）
+## 阶段 1：CANN + python 环境
 
 ```bash
-# 从内部镜像或官网拿 aarch64 toolkit 包，文件名形如：
-#   Ascend-cann-toolkit_9.1.0_linux-aarch64.run
-# 无 root 就装到 home：
+# CANN（已有则跳过安装）：装 home 或 /usr/local 均可
 bash Ascend-cann-toolkit_9.1.0_linux-aarch64.run --quiet --install-path=$HOME/Ascend
-# 有 root 建议装标准路径 /usr/local/Ascend（后续脚本默认找这里）
-```
-
-装完验证：
-
-```bash
-export ASCEND_HOME_PATH=/usr/local/Ascend/cann    # 装 home 则改为 $HOME/Ascend/cann
-[ -d "$ASCEND_HOME_PATH" ] || export ASCEND_HOME_PATH=$(dirname $(find /usr/local/Ascend $HOME/Ascend -maxdepth 2 -name set_env.sh 2>/dev/null | head -1))
+export ASCEND_HOME_PATH=$HOME/Ascend/cann   # 或 /usr/local/Ascend/cann
 source "$ASCEND_HOME_PATH/set_env.sh"
-which msopgen && echo CANN-OK    # 后面编译算子要用 msopgen
+
+sudo dnf install -y python3.11 python3.11-pip cmake make gcc-c++ 2>/dev/null || true
+python3.11 -m venv ~/venv-urma && source ~/venv-urma/bin/activate
+pip install --upgrade pip && pip install torch==2.10.0 torch-npu==2.10.0.post2
+python3 -c "import torch, torch_npu; torch.npu.set_device(0); print('NPU-OK')"
 ```
 
-### 1.2 python 3.11 + torch/torch-npu
-
-```bash
-# openEuler 24.03:
-sudo dnf install -y python3.11 python3.11-pip 2>/dev/null || true
-python3.11 -m venv ~/venv-a5 && source ~/venv-a5/bin/activate
-pip install --upgrade pip
-pip install torch==2.10.0
-pip install torch-npu==2.10.0.post2
-python3 -c "import torch, torch_npu; print(torch.__version__, torch_npu.__version__); torch.npu.set_device(0); print('NPU-OK')"
-```
-
-`NPU-OK` 打不出来就停，贴报错。
-
----
-
-## 阶段 2：拉代码（三个仓）
+## 阶段 2：拉代码
 
 ```bash
 cd $BASE
-git clone -b scatter_copy_a5_c8 https://github.com/xieqiang-hw/nanovllm-DSA-offload_scatter_copy.git nanovllm-scatter_copy
-git clone https://github.com/JiJiaF1020/DSA-offload-KVAF-mtp_xzw_0903.git dsa-kvaf
-git clone -b ak_mtp_yq --single-branch https://gitcode.com/CacheOS/KVAF.git KVAF
-# gitcode 若要鉴权：GIT_TERMINAL_PROMPT=0 git -c 'credential.helper=!f() { printf "username=%s\npassword=%s\n" "$GITCODE_USERNAME" "$GITCODE_KEY"; }; f' clone -b ak_mtp_yq --single-branch https://gitcode.com/CacheOS/KVAF.git KVAF
+git clone https://github.com/JiJiaF1020/copy-scheme-bench.git bench
+# KVAF 二选一：
+#   a) git clone -b ak_mtp_yq --single-branch https://gitcode.com/CacheOS/KVAF.git KVAF   (需凭据)
+#   b) tar xf <KVAF tarball> && mv <解包目录> KVAF
 ```
 
----
-
-## 阶段 3：KSC 侧（PCIe）构建 + 测量
+## 阶段 3：构建 KVAF（cpu + npu 两个 role)
 
 ```bash
-cd $BASE/nanovllm-scatter_copy
-unset ASCEND_CUSTOM_OPP_PATH NANOVLLM_CUST_OPAPI_LIB NANOVLLM_A5_INSTALL_OPP_PATH
+cd $BASE/KVAF
+bash build.sh cpu --build-dir $BASE/KVAF/build-cpu --jobs $(nproc)
 source "$ASCEND_HOME_PATH/set_env.sh"
-export A5_SOC_VERSION=ascend950 NANOVLLM_A5_OPS_BUILD_JOBS=$(nproc)
-export PYTHONPATH=$PWD/torch_extension:$PYTHONPATH
-bash build_c8.sh
-# 通过标准：末尾打印 "[c8_build] torch extension import: OK"
+ASCEND_CANN_PACKAGE_PATH="$ASCEND_HOME_PATH" PYTHON="$(command -v python3)" \
+  bash build.sh npu --build-dir $BASE/KVAF/build-npu --jobs $(nproc)
+
+# 通过标准（三条都成立）：
+ls -l $BASE/KVAF/build-cpu/runtime/kvaf_cpu_service
+ls -l $BASE/KVAF/build-npu/bin/kvaf_execute_batch_get_kernels.o $BASE/KVAF/build-npu/bin/kvaf_execute_batch_put_kernels.o
+PYTHONPATH=$BASE/KVAF/build-npu/python python3 -c "import kvaf; assert hasattr(kvaf,'NpuRuntime'); print('KVAF-BINDING-OK')"
 ```
 
-测量（两点，每点几分钟）：
+## 阶段 4：起 KVAF CPU service（常驻）
 
 ```bash
-export ASCEND_RT_VISIBLE_DEVICES=0
-for CC in 300 2048; do
-python3 tests/test_kvcache_scatter_copy.py --device npu:0 \
-  --batch-size 24 --copy-count $CC \
-  --source-len 65536 --hbm-slots 8192 --warmup 10 --iters 500 \
-  --json-output results/ab_ksc_bs24_copy$CC.json 2>&1 | tee results/ab_ksc_bs24_copy$CC.log
-done
-```
-
-取数：日志末尾六列表的 `avg_bandwidth`（十进制 GB/s）。正确性门槛：日志含 `ok=1` 与 `A5_KVCACHE_SCATTER_COPY_C8_UT_OK`。
-
----
-
-## 阶段 4：KVAF 侧（URMA）构建 + 起 CPU service
-
-### 4.1 构建 KVAF CPU + NPU Runtime
-
-```bash
-cd $BASE/dsa-kvaf
-cat > .env <<EOF
-KVAF_ROOT=$BASE/KVAF
-KVAF_GIT_BRANCH=ak_mtp_yq
-KVAF_CANN_PATH=$ASCEND_HOME_PATH
-KVAF_NPU_BUILD_DIR=$BASE/KVAF/build-npu
-KVAF_CPU_BUILD_DIR=$BASE/KVAF/build-cpu
-EOF
-bash scripts/a5_dsa_install_kvaf.sh cpu   # 产物: $BASE/KVAF/build-cpu/runtime/kvaf_cpu_service
-bash scripts/a5_dsa_install_kvaf.sh npu   # 产物: build-npu/bin/*.o + build-npu/python/kvaf/
-# npu 构建末尾会自检 binding（NpuRuntime/link_to/scalar miss_count ABI），报错就停
-```
-
-### 4.2 构建 standalone DSA registration（KVAF bench 的 Prepare 算子）
-
-```bash
-cd $BASE/dsa-kvaf/csrc/attention/nanovllm_a5_ops
-source "$ASCEND_HOME_PATH/set_env.sh"
-export A5_SOC_VERSION=ascend950 NANOVLLM_A5_OPS_BUILD_JOBS=$(nproc)
-bash build_nanovllm_ops.sh
-export PYTHONPATH=$PWD/torch_extension:$PYTHONPATH
-python3 -c "import torch, torch_npu; import nanovllm_dsa_a5; print(hasattr(torch.ops.nanovllm_dsa,'kvaf_batch_get_prepare_out'))"
-# 期望 True
-```
-
-### 4.3 起 KVAF CPU service（常驻，另开一个终端或 nohup）
-
-```bash
-cd $BASE/dsa-kvaf
-nohup bash scripts/a5_dsa_kvaf_cpu_service.sh > kvaf_cpu_service.log 2>&1 &
+nohup $BASE/KVAF/build-cpu/runtime/kvaf_cpu_service --listen 0.0.0.0 --port 28999 \
+  > $BASE/kvaf_cpu_service.log 2>&1 &
 sleep 5
-ss -ltnp | grep 28999   # 看到监听即 OK
+ss -ltnp | grep 28999    # 看到监听即 OK；起不来先看 $BASE/kvaf_cpu_service.log
 ```
 
----
-
-## 阶段 5：KVAF 侧测量
+## 阶段 5：跑 URMA 带宽扫描
 
 ```bash
-cd $BASE/dsa-kvaf/csrc/attention/nanovllm_a5_ops/tests
-source ~/venv-a5/bin/activate
-export PYTHONPATH=$BASE/KVAF/build-npu/python:$BASE/dsa-kvaf/csrc/attention/nanovllm_a5_ops/torch_extension:$PYTHONPATH
+source ~/venv-urma/bin/activate
+export PYTHONPATH=$BASE/KVAF/build-npu/python${PYTHONPATH:+:$PYTHONPATH}
 export ASCEND_RT_VISIBLE_DEVICES=0
-
-for MC in 300 2048; do
-python3 benchmark_kvaf_batch_get.py --device npu:0 --batch-size 24 \
-  --miss-count $MC --qcap 64 --warmup 20 --iters 500 \
+cd $BASE/bench/side_kvaf
+python3 urma_ceiling_bench.py --device npu:0 \
   --batch-get-kernel $BASE/KVAF/build-npu/bin/kvaf_execute_batch_get_kernels.o \
   --batch-put-kernel $BASE/KVAF/build-npu/bin/kvaf_execute_batch_put_kernels.o \
   --cpu-service-addr 127.0.0.1:28999 \
-  2>&1 | tee kvaf_ab_bs24_miss$MC.log
-done
+  2>&1 | tee $BASE/urma_ceiling.log
 ```
 
-取数：
-- 正确性门槛：日志含 `KVAF_SUBGRAPH_C_BENCHMARK_CORRECTNESS ok=1`。
-- 主指标：`operation=batch_get_npu_event ... payload_gibps=X.XXX`，**×1.0737 换成十进制 GB/s**。
-- 副指标：`batch_get_call_to_stream_completion` 的 payload_gibps（host 墙钟口径）。
+默认扫 5 档 payload × 2 布局 = 10 个点：tokens {7200, 16384, 49152, 131072,
+262144}（≈4.7MB ~ 172MB/迭代）× {sequential, random}。可加档：
+`--tokens 7200 16384 49152 131072 262144 524288`。
 
-## 阶段 6：防漂移复跑
+## 取数与判读
 
-按上面 KSC 的命令再跑一遍两点。两遍同坐标差 >5% 说明机器在漂，数据标注后慎用。
+- 正确性门槛：每行 `URMA_CEILING_RESULT ... ok=1`；有 ok=0 该点无效。
+- **极限 = sequential 布局最高档的 `gbps`**（十进制 GB/s，已由 gibps 换算好）。
+- `random` 布局是生产（LIDU 随机 miss）代表值；random 比 sequential 低 >30%
+  说明随机行惩罚大，单独标注。
+- 最高档带宽仍在随 payload 上升 ⇒ 没摸到顶，加大 --tokens 复测。
 
----
+## 可选：KSC(PCIe）对照
 
-## 回报模板（贴回这六项 + 所有 config 行）
+公开仓 `xieqiang-hw/nanovllm-DSA-offload_scatter_copy`（branch
+`scatter_copy_a5_c8`）`build_c8.sh` 构建后跑
+`tests/test_kvcache_scatter_copy.py --device npu:0 --batch-size 24
+--copy-count {300,2048} --source-len 65536 --hbm-slots 8192 --warmup 10
+--iters 500`，取 `avg_bandwidth` 与本 bench 的 random 档同坐标比。
 
-| 坐标 | KSC avg_bandwidth (GB/s) | KSC 复跑 | KVAF payload_gibps (GiB/s) | KVAF×1.0737 (GB/s) | 比值 |
-|---|---|---|---|---|---|
-| bs24 × 300 | | | | | |
-| bs24 × 2048 | | | | | |
+## 回报模板
 
-判读口径（事先写死）：比值 ≥1.2 → URMA 优势实锤；0.8~1.2 → 同档，带宽不是决策变量；≤0.8 → KVAF 劣势，加跑 `benchmark_lidu_fused_batch_get.py` 看 post/transfer_window 分解定位。
-
-## 常见卡点速查
-
-- `msopgen not found` → CANN 没 source 或没装 toolkit（只有 runtime 不够）。
-- KVAF npu 构建报 `CANN path is absent` → `.env` 里 KVAF_CANN_PATH 指错。
-- gitcode clone 401/403 → 需要 GITCODE_USERNAME/GITCODE_KEY。
-- bench 报 `KVAF CPU service is unreachable` → 4.3 的 service 没起来，看 kvaf_cpu_service.log。
-- `import kvaf` 找不到 → PYTHONPATH 没含 `$BASE/KVAF/build-npu/python`。
-- 任一处 correctness 失败 → 该点数据无效，照常把日志贴回来。
+阶段 0 全部原文 + 阶段 3 三条通过标准证据 + `ss -ltnp` 行 +
+`URMA_CEILING_CONFIG` 行 + 全部 `URMA_CEILING_RESULT` 行 + 各阶段时间戳。

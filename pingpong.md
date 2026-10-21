@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: §K1b 已派单（KVAF/URMA vs KSC/PCIe H2D 带宽 A/B，空环境从零搭建版，执行手册 side_kvaf/baremetal_runbook.md，取代 §K1）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
+- Current owner: **绿区**。Status: §K2 已派单（URMA/KVAF BatchGet 带宽极限，蓝区自研自包含 bench side_kvaf/urma_ceiling_bench.py，取代 §K1b）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
 
 ## 0. 目标与口径
 
@@ -35,7 +35,62 @@ vLLM 集成决策的带宽对比数据。
 
 ---
 
-## §K1b 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）
+## §K2 派单：URMA(KVAF BatchGet)带宽极限——自包含 bench 版（2026-10-21，蓝区）
+
+> 取代 §K1b。用户澄清关注点：**只看走 URMA 的带宽极限**。蓝区新写
+> 自包含 bench `side_kvaf/urma_ceiling_bench.py`（直接用 KVAF NpuRuntime
+> 的 batch_get，不经 DSA Prepare 算子），彻底去掉对 0903 私有仓、
+> vLLM、DSA 算子、docker 的依赖。执行手册 =
+> `side_kvaf/baremetal_runbook.md`（已重写为本单版本）。
+
+### 目标
+
+同机单卡测 UB/URMA 路径 DDR→HBM 有效带宽极限：payload 扫档
+tokens {7200, 16384, 49152, 131072, 262144}（≈4.7~172 MB/迭代，
+656B/token）× 布局 {sequential=极限上界， random=生产代表}，共 10 点。
+
+### 前置核验
+
+1. 本仓 `git pull --ff-only` 后 `git log --oneline -1` 标题含「K2」。
+2. 手册**阶段 0** 逐条执行并原文回传；`/dev/uburma`、`liburma.so`
+   任一缺失 ⇒ 停（本机无 URMA 路径）。
+3. **KVAF 源码供给**：gitcode `CacheOS/KVAF` 是私有仓——确认凭据 clone
+   可行，或用户已把 tarball 放到机器上；两者都不行 ⇒ 停，写明，等蓝区
+   供给。**KVAF 源码/产物不得拷入本公开仓。**
+4. 手册阶段 1/3/4 的通过标准逐条核对（NPU-OK、KVAF 三产物 +
+   KVAF-BINDING-OK、`ss -ltnp | grep 28999` 监听）。
+
+### 执行命令
+
+手册阶段 5 逐字执行（一条 bench 命令，默认 10 点）。
+
+### 通过标准
+
+- K2-G1：阶段 0 逐条原文。
+- K2-G2：阶段 3 三条产物证据 + `KVAF-BINDING-OK`。
+- K2-G3：`URMA_CEILING_CONFIG` 行 + **10 行** `URMA_CEILING_RESULT`
+  且全部 `ok=1`。
+- K2-G4：service 监听证据 + 各阶段起止时间戳。
+- 构建失败：报错末 30 行进交付，停止，不猜修。
+
+### 回传格式
+
+交付模板 + 阶段 0 原文 + 通过标准证据行 + CONFIG/RESULT 全部行 +
+service 日志首尾各 20 行 + 时间戳。
+
+### 判读预案（派单时写死）
+
+- **极限值 = sequential 最高档 `gbps`**（脚本已按 ×1.0737 换算十进制）。
+- 最高档带宽仍随 payload 上升 ⇒ 未触顶，补 `--tokens ... 524288` 复测。
+- random 较 sequential 低 >30% ⇒ 随机行惩罚显著，单独标注（生产口径
+  看 random）。
+- 与 KSC 的可选对照用 random 档 vs scatter `avg_bandwidth`（同坐标），
+  沿用 §K1 的 1.2×/0.8× 三档裁决。
+- ok=0 的点数据无效。
+
+---
+
+## §K1b-旧 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（由 §K2 取代：用户澄清只关注 URMA 带宽极限；bench 改蓝区自研自包含版，去掉 0903 私有仓/DSA 算子依赖）
 
 > 取代 §K1。起因更新：目标 A5 机是**完全空环境**（无 docker、无 CANN、
 > 无任何仓库），§K1 的「定位已有 KVAF 环境的机器」前提不成立。

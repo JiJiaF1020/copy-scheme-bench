@@ -304,3 +304,18 @@ build_c8+两点 → KVAF cpu/npu 构建+standalone registration+起 service →
 KVAF 两点 → KSC 复跑防漂移），绿区逐阶段照做、逐条回传。测量坐标与
 判读预案沿用 §K1 写死口径（bs24×{300,2048}、656B/token、payload_gibps
 ×1.0737 换算、1.2×/0.8× 三档裁决）。零被测代码改动。
+
+## §K2 URMA(KVAF BatchGet)带宽极限——自包含 bench 版（2026-10-21，蓝区）（取代 §K1b）
+
+**派单**（commit 本轮 push 后回填）：起因——用户澄清「其实就想看走 URMA
+的带宽极限」，并要求测试所需全部进公开仓。蓝区新写自包含 bench
+side_kvaf/urma_ceiling_bench.py：直接用 KVAF NpuRuntime.batch_get
+（descriptor 由脚本构造，不经 DSA Prepare 算子），依赖只剩 KVAF NPU
+binding + torch/torch_npu——0903 私有仓、vLLM、DSA 算子、docker 全部
+移出依赖链；side_kvaf/baremetal_runbook.md 重写为五阶段自包含版
+（Go/No-Go → CANN+venv → 两仓 → KVAF cpu/npu 构建 → 起 service → 扫描）。
+唯一剩余私有依赖 = gitcode CacheOS/KVAF 源码（凭据 clone 或用户放
+tarball；第三方私有代码，不入公开仓）。扫描矩阵：tokens {7200,16384,
+49152,131072,262144}×{sequential,random}=10 点，每点 ok 校验 + NPU event
+流水计时，报 gibps+gbps。判据写死：极限=sequential 最高档 gbps；仍上升
+⇒ 加档复测；random 低 >30% 标注随机惩罚；KSC 对照沿用 1.2×/0.8× 三档。
