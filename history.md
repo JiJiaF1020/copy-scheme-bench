@@ -296,7 +296,7 @@ KVAF ≥ KSC×1.2 ⇒ URMA 优势实锤；0.8~1.2× ⇒ 同档、带宽非决策
 
 ## §K1b KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（取代 §K1）
 
-**派单**（commit 本轮 push 后回填）：起因——用户确认目标 A5 为完全空环境
+**派单**（commit 0b79fd7）：起因——用户确认目标 A5 为完全空环境
 （无 docker/CANN/仓库），§K1 前置 3「定位已有 KVAF 环境机器」不成立。
 改派：新增 side_kvaf/baremetal_runbook.md（从零搭建六阶段手册：Go/No-Go
 核验 → CANN9.1+torch2.10/torch-npu2.10.0.post2 → 三仓 clone → KSC
