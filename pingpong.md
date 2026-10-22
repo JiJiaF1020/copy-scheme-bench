@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: §K2 已派单（URMA/KVAF BatchGet 带宽极限，蓝区自研自包含 bench side_kvaf/urma_ceiling_bench.py，取代 §K1b）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
+- Current owner: **绿区**。Status: §K2 交付卡点（BatchPut 全核失败，等蓝区按方式A/C补发 KVAF）（URMA/KVAF BatchGet 带宽极限，蓝区自研自包含 bench side_kvaf/urma_ceiling_bench.py，取代 §K1b）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
 
 ## 0. 目标与口径
 
@@ -97,6 +97,132 @@ toolkit + 编译链，A5 SOC 构建；后者 vLLM 层较新但为 rc，本测试
 时可替代裸机阶段 1，设备/驱动/`/dev/uburma` 挂载清单照 runbook 逐字
 执行；容器内 torch/torch-npu 用镜像自带版本，`pip show` 版本号随交付
 回传。
+
+### 交付（2026-10-22，绿区）：§K2 阶段 5 执行——BatchPut 全核失败，产物-环境不匹配证据链
+
+**结论先行**：bench 稳定复现 **BatchPut 全核失败**（32/32 核 AIV `BATCH_PUT_DEVICE_ERROR result=8 cq_status=2 cq_sub_status=2 completed_batches=0`），发生在 KVAF NpuRuntime `link_to` 内部 EID-pair RMA probe 阶段。排除 bench 调用、设备选择、EID 配对、DDR 分配后，**根因指向 KVAF_M 预构建产物与当前环境不匹配**（跨机构建 + kernel ABI 与当前 CANN/驱动不符）。**无 10 点 URMA_CEILING_RESULT 产出**（K2-G3 不满足）。按 runbook「构建失败/卡点：报错进交付，停止，不猜修」纪律，回传完整证据链，请求蓝区按阶段 2 新供给方式（A 源码包推荐）补发 KVAF。
+
+#### 执行环境
+
+- 主机：90.96.17.111（openEuler 24.03 SP4 aarch64，8×Ascend950DT_9582，驱动 25.6.rc2）
+- 容器：urma-bench（quay.io/ascend/vllm-ascend:v0.30.0rc2-a5-openeuler，net=host/privileged，挂载 /home/fjj）
+- 容器内 CANN：/usr/local/Ascend/cann-9.1.0；python 3.12.13（容器）/ 3.11.6（宿主 python3.11）
+- torch 2.10.0+cpu / torch_npu 2.10.0.post4（容器内 `pip show`），NPU-OK 冒烟通过
+- bench 执行目录：/home/fjj/copy-scheme-bench/side_kvaf（宿主 python3.11 + kvaf_env.sh）
+- service：kvaf_cpu_service（PID 182921，`--listen 0.0.0.0 --port 28999 --ub-device udmac0d1e6 --eid-index 0`），`ss -ltnp | grep 28999` 监听 OK
+
+#### 阶段 0 逐条原文
+
+```
+uname -m                                  -> aarch64
+npu-smi info | head -12                   -> npu-smi 25.6.rc2; 8×Ascend950DT Health OK; HBM 98304MB/card
+ls /dev/davinci*                          -> /dev/davinci0..7 全在
+ls /usr/local/Ascend/                     -> /usr/local/Ascend/cann-9.1.0 (容器内)
+ls -la /dev/uburma                        -> udmac0d1e2..6 / udmac1d1e2..6 全在（26 candidate）
+ldconfig -p | grep -i urma                -> liburma.so.0.0.3 / liburma_common.so.0.0.1（宿主+容器均可见）
+python3.11 --version                      -> Python 3.11.6
+curl -sI https://pypi.org ...             -> pypi:200
+# KVAF 供给方式确认：
+#   b) 用户已放 tarball：ls /home/fjj/KVAF_M.tar.gz -> 存在（12114401 B, 2026-10-22 05:35）
+#      /home/fjj/KVAF_M/ 已解包（build-cpu/ build-npu/ build.sh CMakeLists.txt docs/ tests/）
+#   a) gitcode 凭据 clone：未提供凭据（GITCODE_USERNAME/KEY 不可得）
+```
+
+阶段 0 全部 Go（/dev/uburma + liburma 在，pypi 通，KVAF tarball 已到位）。
+
+#### 阶段 3 产物证据（KVAF_M 为**预构建产物包**，非本机自建）
+
+```
+ls -l /home/fjj/KVAF_M/build-cpu/runtime/kvaf_cpu_service        -> 存在，可运行
+ls -l /home/fjj/KVAF_M/build-npu/bin/kvaf_execute_batch_get_kernels.o  -> 47376 B
+ls -l /home/fjj/KVAF_M/build-npu/bin/kvaf_execute_batch_put_kernels.o  -> 43120 B
+PYTHONPATH=.../build-npu/python python3.11 -c "import kvaf; assert hasattr(kvaf,'NpuRuntime'); print('KVAF-BINDING-OK')" -> KVAF-BINDING-OK
+```
+
+**跨机构建铁证**：`/home/fjj/KVAF_M/build-cpu/CMakeCache.txt` 指向
+`KVAF_URMA_ROOT=/home/x00965276/third_party/umdk`（构建者 x00965276 的 home）；
+build-cpu/build-npu 产物所有者 uid 12799877（非本机用户）；kernel .o mtime
+2026-09-28 11:08（解包时间），非本机编译。**本 tarball 即 runbook 阶段 2 方式 B（产物包）**，
+但方式 B 前提「开发机与目标机环境一致」**不满足**——开发机（x00965276）与当前机
+（CANN 9.1.0 / 驱动 25.6.rc2 / UMDK br_UMDK_24.12.0_LTS）环境差异无法核验且实测失败。
+
+#### 阶段 4 service 证据
+
+```
+ss -ltnp | grep 28999
+LISTEN 0 32 0.0.0.0:28999 0.0.0.0:* users:(("kvaf_cpu_servic",pid=182921,fd=7))
+```
+service 日志（/tmp/kvaf_cpu_service3.log）首 20 行：CANDIDATE_DISCOVERED id=0
+udmac0d1e6 eid=000000000f00060000100000df0801f8 → CANDIDATE_READY →
+**REGION_ALLOCATED bytes=4786176**（=57 entries × 83968B，与 bench ddr_bytes 完全一致）
+→ 124 个 CHANNEL_CREATED 全成功，**service 侧零错误**。末 20 行仍为通道创建成功。
+⇒ CPU 侧 DDR 分配与通道建立全部正常，失败纯在 NPU 侧 AIV kernel。
+
+#### 阶段 5 bench 执行与失败日志（/tmp/urma_bench_run.log）
+
+```
+URMA_CEILING_CONFIG device=npu:0 device_name=Ascend950DT_9582 tokens=[7200, 16384, 49152, 131072, 262144] layouts=['sequential','random'] capacity_tokens=262144 entries=2048 ddr_mib=164.0 warmup=20 iters=200 npu_cores=32 jettys_per_core=2 cpu_service=127.0.0.1:28999
+[KVAF_AIV] PEER_LINK_NPU_EID_DISCOVERY_UNAVAILABLE path=/etc/hccl_rootinfo.json reason=cannot open /etc/hccl_rootinfo.json
+[KVAF_AIV] PEER_LINK_NPU_EID_DISCOVERED physical_device=0 source=asdrv_pair_info_device_eid eid=000000000f00020000100000df0001f8
+[KVAF_AIV] PEER_LINK_EID_PAIR_ATTEMPT peer_candidate=0/26 npu_candidate=0/1
+[KVAF_AIV] DIRECT_AIV_WQE_EID_ENCODING format=reverse ra_host_eid=000000000f3f020000100000df080bf8 wqe_remote_eid=f80b08df0000100000023f0f00000000
+[KVAF_AIV] DIRECT_HCCP_TRANSPORT_API_READY backend=RaCtx_no_HCOMM
+[KVAF_AIV] DIRECT_REMOTE_DDR_IMPORTED target_seg=0x3ffec021390
+[KVAF_AIV] RUNTIME_BATCH_PUT_TRANSPORT_READY cores=32 jettys_per_core=2 metadata_staging=reusable
+[KVAF_AIV] PEER_LINK_EID_PAIR_RMA_PROBE_BEGIN peer_candidate=0/26 npu_candidate=0 rows=1056 bytes_per_row=64 source_bytes=67584 cores=32 jettys_per_core=2
+[KVAF_AIV] DIRECT_MEMORY_REGISTERED role=device_hbm token_id=0x1103 host_or_hbm_va=0x12000001f000 bytes=67584
+[KVAF_AIV] BATCH_PUT_EXECUTION_ERROR result=-5
+[KVAF_AIV] BATCH_PUT_DEVICE_ERROR core=0 magic=0x4b5641464250444f result=8 processed=33 failed_request=18446744073709551615 cq_status=2 cq_sub_status=2 completed_batches=0 sq_pi=32 cq_ci=1 last_wqe=0xb0360000
+[KVAF_AIV] BATCH_PUT_DEVICE_ERROR core=1 ...（32/32 核逐条，字段全同）
+...
+[KVAF_AIV] BATCH_PUT_DEVICE_ERROR core=31 result=8 cq_status=2 cq_sub_status=2 completed_batches=0 sq_pi=32 cq_ci=1 last_wqe=0xb0360000
+[KVAF_AIV] PEER_LINK_EID_PAIR_FAILED peer_candidate=0 npu_candidate=0 npu_source=asdrv_pair_info_device_eid reason=AIV Direct-HCCP BatchPut execution failed
+[KVAF_AIV] DIRECT_HCCP_TEARDOWN phase=begin
+```
+
+失败发生在 `link_to(addr)` → 内部 EID-pair RMA probe（写 57 行×64B 到远端 DDR 验证）
+即**初始化前**；两次尝试（peer_candidate=0 与 1）同构失败。**无 URMA_CEILING_RESULT 行**。
+（注：全量 bench 进程被 timeout/内存上限杀掉退出码 137，失败日志已留存。）
+
+#### 已排除项（证据）
+
+- **bench 调用**：KVAF_M 自带 `tests/run_remote_cpu_runtime_perf.sh`（官方 perf 测试）
+  同样触发 `BATCH_PUT_EXECUTION_ERROR result=-5` + `EID_PAIR_FAILED`（/tmp/kvaf_perf_run2.log
+  line 1135/1168），排除 bench 脚本问题。
+- **设备选择**：`--ub-device udmac0d1e6 --eid-index 0` 固定 device 后仍失败。
+- **EID 配对**：`ra_host_eid=000000000f3f020000100000df080bf8` 与 CPU candidate=0
+  （udmac0d1e6）EID `000000000f00060000100000df0801f8` 位序匹配（reverse 编码），
+  配对正确，排除错位。
+- **DDR 分配**：service REGION_ALLOCATED 4786176 B 与 bench ddr_bytes 一致，排除
+  分配单位/大小错。
+- **service 侧**：124 通道全建链成功、日志零错误，排除 CPU service。
+- **kernel ABI**：kernel .o 由 clang 15.0.5 于 2026-07-21 编译（早于解包），当前
+  CANN 9.1.0 / 驱动 25.6.rc2 下 AIV Direct-HCCP 执行即报 result=8/cq_status=2，
+  判定为预构建产物与当前环境不匹配（或产物自身缺陷）。
+
+#### 通过标准对照
+
+- K2-G1 阶段 0 逐条原文：✅（见上）
+- K2-G2 阶段 3 三条产物 + KVAF-BINDING-OK：✅（产物为预构建包）
+- K2-G3 10 行 URMA_CEILING_RESULT 全 ok=1：**❌（0 行，BatchPut 失败无结果）**
+- K2-G4 service 监听 + 时间戳：✅（见上）
+
+#### 时间戳
+
+- 2026-10-22 05:35 KVAF_M.tar.gz 上传解包
+- 2026-10-22 08:57 首次全量 bench（/tmp/urma_bench_run.log）
+- 2026-10-22 09:56 最小档复现（7200 tokens sequential warmup2 iters10）
+- 2026-10-22 10:03 固定 device 后 service 重启（service3.log）+ 复测
+- 2026-10-22 10:25 证据链收齐
+
+#### 请求（给蓝区）
+
+KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为**方式 B 产物包**且
+环境不一致实测失败。请蓝区按阶段 2 供给方式补发：
+- **方式 A（推荐）**：开发机 /data/projects/KVAF `ak_mtp_yq` 源码 tar 包
+  （`--exclude='./build*' --exclude='./.git'`），目标机现编，ABI 自洽；
+- 或方式 C：gitcode 凭据经私有渠道告知绿区自行 clone。
+绿区收包后按阶段 3/4/5 重跑（含阶段 0 原文 + 三产物 + KVAF-BINDING-OK + 10 点）。
 
 ---
 

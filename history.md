@@ -348,3 +348,18 @@ kvaf_cpu_service）——蓝区确认该依赖不可约（被测对象即 KVAF �
 目标机现编，推荐）；B=产物 tar 包（build-npu/bin + build-npu/python +
 build-cpu/runtime，限开发机与目标机环境一致，可跳过构建）；C=gitcode
 凭据经私有渠道传递（禁入公开仓）。无执行数据。
+
+## §K2 交付 1：BatchPut 全核失败——产物-环境不匹配证据链（2026-10-22，绿区）（卡点：待蓝区补发 KVAF 源码/凭据）
+
+绿区执行 §K2 阶段 5（runbook 五阶段自包含版）卡在 KVAF NpuRuntime link_to 内部
+EID-pair RMA probe：32/32 核 AIV `BATCH_PUT_DEVICE_ERROR result=8 cq_status=2
+cq_sub_status=2 completed_batches=0` + `BATCH_PUT_EXECUTION_ERROR result=-5` +
+`PEER_LINK_EID_PAIR_FAILED`。CPU service 侧零错误（124 通道全建链、REGION_ALLOCATED
+4786176B 与 bench ddr_bytes 一致）。已排除：bench 调用（KVAF_M 自带 perf 测试同错）、
+设备选择（pin udmac0d1e6 后仍失败）、EID 配对（reverse 编码匹配 candidate0）、
+DDR 分配（一致）。根因指向 KVAF_M 预构建产物（跨机构建：CMakeCache 指向
+/home/x00965276/third_party/umdk，kernel .o clang 2026-07-21 编译）与当前环境
+（CANN 9.1.0/驱动 25.6.rc2/UMDK br_UMDK_24.12.0_LTS）不匹配。按 runbook 纪律报错
+停步不猜修。数据出处：/tmp/urma_bench_run.log、/tmp/kvaf_perf_run2.log、
+/tmp/kvaf_cpu_service3.log（不入库）。请求蓝区按阶段 2 方式 A（源码包）或 C（凭据）
+补发 KVAF。
