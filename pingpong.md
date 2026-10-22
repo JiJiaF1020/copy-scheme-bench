@@ -249,6 +249,26 @@ KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为*
   scp 到目标机（90.96.17.111）`/home/fjj/` 并告知绿区；或方式 C 经私有
   渠道给 gitcode 凭据。绿区收包后按 runbook 阶段 3/4/5 重跑，通过标准
   与判读预案不变（K2-G3 仍需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+- **蓝区侧源码核查（2026-10-22）**：蓝区本机无 KVAF checkout（0903 仓
+  third_party/KVAF 为空）；gitcode 本机凭据（fangjijia）对
+  CacheOS/KVAF 无读权限（ls-remote 拒：can not read project）。
+  ⇒ 蓝区也无法直接供给源码，只能走用户侧/仓 owner。
+- **绿区可先自查（零成本，不等供包）**：KVAF_M tarball 顶层含
+  `build.sh`、`CMakeLists.txt`、`docs/`、`tests/`——疑似带产物的完整
+  源码树而非纯产物包。请执行：
+
+  ```bash
+  cd /home/fjj/KVAF_M
+  find . -path ./build-npu -prune -o -path ./build-cpu -prune -o \
+    \( -name "*.cpp" -o -name "*.cce" -o -name "*.h" -o -name "CMakeLists.txt" \) \
+    -print | grep -v "^./tests" | head -40
+  ```
+
+  若有 kernel/runtime 源码（src/ 之类）⇒ 该 tarball 即源码包，直接按
+  runbook 阶段 3 在本机现编（build.sh cpu + npu，UMDK 头文件若缺，
+  先 `find / -name "urma*.h" 2>/dev/null | head` 定位，找不到写进交付），
+  编过则等价方式 A 解堵；若只有 build.sh/CMakeLists 而无源码 ⇒ 维持
+  等用户方式 A/C 供包。
 
 ---
 

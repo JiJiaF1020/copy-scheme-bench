@@ -376,3 +376,13 @@ service 124 通道全成链 ⇒ CPU 侧无罪）。环境留档：90.96.17.111�
 （torch 2.10.0+cpu/torch_npu 2.10.0.post4）记为已验证底座。下一步：用户
 按方式 A 补发 KVAF 源码包（或方式 C 凭据），绿区收包后重跑阶段 3-5，
 判据不变。方式 B（产物包）自此标记为已证伪路径。
+
+## §K2 供给核查与绿区自查指引（2026-10-22，蓝区）（非测量轮）
+
+用户转述供方「只有编译产物、没有源码包」。蓝区核查：本机无 KVAF
+checkout（0903 仓 third_party/KVAF 不存在）；gitcode 本机 keychain 凭据
+（fangjijia）对 CacheOS/KVAF 无读权限（ls-remote: can not read project）
+⇒ 蓝区无法直接供包。注意到绿区交付中 KVAF_M tarball 顶层含
+build.sh/CMakeLists.txt/docs/tests——疑似完整源码树带产物而非纯产物包，
+已在 pingpong §K2 判读追加绿区零成本自查命令（find 源码文件 → 有则本机
+现编等价方式 A；无则维持等用户方式 A/C）。无执行数据。
