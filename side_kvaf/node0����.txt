@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+unset ftp_proxy
+unset https_proxy
+unset http_proxy
+unset HCCL_INTRA_ROCE_ENABLE
+unset ftp_proxy FTP_PROXY
+unset https_proxy HTTPS_PROXY
+unset http_proxy HTTP_PROXY
+
+source /root/.bashrc
+export HCCL_DFS_CONFIG="task_exception:off,inconsistent_check:off"
+
+export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
+export TASK_QUEUE_ENABLE=1
+
+# 修改本机对应网卡名和本机ip
+nic_name="enp35s0f2"
+local_ip="141.61.95.179"
+node0_ip="141.61.95.179"
+
+export HCCL_IF_IP=$local_ip
+export GLOO_SOCKET_IFNAME=$nic_name
+export TP_SOCKET_IFNAME=$nic_name
+export HCCL_SOCKET_IFNAME=$nic_name
+export OMP_PROC_BIND=false
+export OMP_NUM_THREADS=100
+export HCCL_BUFFSIZE=1200
+export HCCL_OP_EXPANSION_MODE="AIV"
+export VLLM_ASCEND_ENABLE_FLASHCOMM1=0
+export VLLM_ASCEND_ENABLE_PREFETCH_MLP=1
+export HCCL_INTRA_PCIE_ENABLE=1
+export HCCL_INTRA_ROCE_ENABLE=0
+export ASCEND_LAUNCH_BLOCKING=0
+export DYNAMIC_EPLB="true"
+#export VLLM_ASCEND_DP_ALLREDUCE_ON_NPU=1
+
+vllm serve /home/s30013950/GLM-5.1-W4A4C8-mxfp4-rot-0625 \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --api-server-count 1 \
+  --distributed-executor-backend mp \
+  --data-parallel-size 16 \
+  --data-parallel-rpc-port 13389 \
+  --tensor-parallel-size 1 \
+  --data-parallel-size-local 8 \
+  --data-parallel-address $node0_ip \
+  --data-parallel-start-rank 0 \
+  --seed 1024 \
+  --served-model-name glm5-1 \
+  --enable-expert-parallel \
+  --max-num-seqs 64 \
+  --max-model-len 202752 \
+  --max-num-batched-tokens 4096 \
+  --trust-remote-code \
+  --enable-chunked-prefill \
+  --enable-prefix-caching \
+  --gpu-memory-utilization 0.9 \
+  --quantization ascend \
+  --async-scheduling \
+  --enable-auto-tool-choice \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --profiler-config '{"profiler": "torch", "torch_profiler_dir": "./vllm_profile", "torch_profiler_with_stack": false}' \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \
+  --speculative-config '{"num_speculative_tokens": 3,"method": "deepseek_mtp", "enforce_eager":true}' \
+  --additional_config '{"enable_cpu_binding": "True", "multistream_overlap_shared_expert": "True", "enable_sparse_sfa_c8": true, "enable_sparse_li_c8": true, "enable_dsa_cp":false,"eplb_config": {"dynamic_eplb": true,"expert_heat_collection_interval": 50, "algorithm_execution_interval": 5, "eplb_policy_type": 2,"num_redundant_experts": 0 }}' \
+  2>&1 | tee output.log

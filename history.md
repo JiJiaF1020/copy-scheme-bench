@@ -400,3 +400,17 @@ tests/ python 测试与 perf 脚本。⇒ 该 tarball 为纯产物包，蓝区
 结论维持：方式 A/C 球仍在用户侧，绿区已就绪（service PID 182921 在
 28999 监听，仓库已同步 0c5010b），收到源码包后即可现编重跑，判据不变
 （K2-G3 需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+
+## §K2 绿区复现：v0.23.0 基线镜像验证——镜像版本非根因，产物包跨机不匹配坐实（2026-10-22，绿区）（非测量轮）
+
+按用户指定从 141.61.33.21 经本机中转装好 quay.io/ascend/vllm-ascend:v0.23.0-a5-openeuler
+（id 38b801e64b88，md5 ca8b638645ff633a1744bce45f2cbff0 校验一致），docker load
+并建容器 urma-bench-v023（复用挂载/设备）。环境：python3.12.13 + python3.11
+（补 torch 2.10.0+cpu / torch_npu 2.10.0.post4，自 v0.30 容器搬运），CANN 9.1.0
+= 与 v0.30.0rc2 底层一致。KVAF-BINDING-OK + NPU-OK 通过，但 §K2 mini bench
+（tokens7200/sequential）AIV probe 同样失败：BATCH_PUT_EXECUTION_ERROR result=-5、
+32/32 核 BATCH_PUT_DEVICE_ERROR result=8 cq_status=2、PEER_LINK_EID_PAIR_FAILED、
+BENCH_RC=124——签名与 v0.30 完全一致。=> 镜像版本非根因，坐实 KVAF_M 预构建
+产物包跨机不匹配（kernel .o 2026-07-21 clang 15.0.5 在 x00965276 编译）。
+结论维持：方式 A/C 球仍在用户侧，绿区已就绪（service PID 182921/28999，
+v0.23.0 环境亦就绪），收源码包现编重跑判据不变（K2-G3 需 10 行全 ok=1）。

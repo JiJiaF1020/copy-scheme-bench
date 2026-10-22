@@ -287,6 +287,27 @@ KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为*
   0c5010b），收到源码包后即可现编重跑，判据不变（K2-G3 需 10 行
   URMA_CEILING_RESULT 全 ok=1）。
 
+- **v0.23.0 基线镜像装好+复现验证（2026-10-22，绿区）（非测量轮）**：按用户指定
+  经 141.61.33.21 中转装好 `quay.io/ascend/vllm-ascend:v0.23.0-a5-openeuler`
+  （镜像 id 38b801e64b88，与用户给的一致，md5 ca8b638645ff633a1744bce45f2cbff0
+  传输校验一致），已 docker load 到 90.96.17.111 并创建容器 `urma-bench-v023`
+  （复用 urma-bench 的挂载/设备：8x davinci + uburma/ummu/hisi_hdc）。环境：
+  python3.12.13 + python3.11（已补 torch 2.10.0+cpu / torch_npu 2.10.0.post4，
+  自 v0.30 容器搬运），CANN 9.1.0——与 v0.30.0rc2 底层一致。
+- **复现结果：镜像版本非根因**。在 v0.23.0 容器内 `KVAF-BINDING-OK` +
+  `NPU-OK`（torch.npu.set_device(0) 正常），但跑 §K2 mini bench（tokens
+  7200/sequential/warmup2/iters10）**AIV probe 同样失败**，错误签名与
+  v0.30.0rc2 完全一致：
+  - `BATCH_PUT_EXECUTION_ERROR result=-5`
+  - 32/32 核 `BATCH_PUT_DEVICE_ERROR result=8 cq_status=2 cq_sub_status=2`
+  - `PEER_LINK_EID_PAIR_FAILED reason=AIV Direct-HCCP BatchPut execution failed`
+  - BENCH_RC=124
+  => 23.0 基线镜像下产物包同样失败，坐实根因=**KVAF_M 预构建产物包跨机不匹配**
+  （kernel .o 2026-07-21 clang 15.0.5 在 x00965276 编译），非测试环境问题。
+  结论维持：**方式 A/C 球仍在用户侧**，绿区已就绪（service PID 182921 在
+  28999 监听，v0.23.0 环境亦就绪），收到源码包后现编重跑判据不变（K2-G3
+  需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+
 ---
 
 ## §K1b-旧 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（由 §K2 取代：用户澄清只关注 URMA 带宽极限；bench 改蓝区自研自包含版，去掉 0903 私有仓/DSA 算子依赖）
