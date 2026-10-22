@@ -386,3 +386,17 @@ checkout（0903 仓 third_party/KVAF 不存在）；gitcode 本机 keychain 凭�
 build.sh/CMakeLists.txt/docs/tests——疑似完整源码树带产物而非纯产物包，
 已在 pingpong §K2 判读追加绿区零成本自查命令（find 源码文件 → 有则本机
 现编等价方式 A；无则维持等用户方式 A/C）。无执行数据。
+
+## §K2 绿区自查回执：KVAF_M 为纯产物包，源码树怀疑证伪（2026-10-22，绿区）（非测量轮）
+
+按蓝区 0c5010b 指引对 /home/fjj/KVAF_M 执行源码树自查：`find` 全树
+仅命中 build-cpu/build-npu 的 CMakeCompilerId 自检 cpp（无任何业务
+.cpp/.cce/.cc），`find . -name "*.h"` 零命中；顶层 CMakeLists.txt
+`add_subdirectory` 引用的 common/meta_manager/access_operator/runtime/
+bindings 五源码子目录全部不存在；顶层仅 build-cpu/ build-npu/ 产物目录
++ build.sh 引导脚本（且会从 gitcode 拉 UMDK）+ docs/ 两份设计文档 +
+tests/ python 测试与 perf 脚本。⇒ 该 tarball 为纯产物包，蓝区
+「疑似完整源码树」怀疑被证伪，build.sh 无源可编，不构成源码包。
+结论维持：方式 A/C 球仍在用户侧，绿区已就绪（service PID 182921 在
+28999 监听，仓库已同步 0c5010b），收到源码包后即可现编重跑，判据不变
+（K2-G3 需 10 行 URMA_CEILING_RESULT 全 ok=1）。

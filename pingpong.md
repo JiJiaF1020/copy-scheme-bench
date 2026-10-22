@@ -269,6 +269,23 @@ KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为*
   先 `find / -name "urma*.h" 2>/dev/null | head` 定位，找不到写进交付），
   编过则等价方式 A 解堵；若只有 build.sh/CMakeLists 而无源码 ⇒ 维持
   等用户方式 A/C 供包。
+- **绿区自查结果（2026-10-22，绿区）（非测量轮）**：按蓝区指引对
+  `/home/fjj/KVAF_M` 执行源码树自查——**该 tarball 为纯产物包，不含
+  源码树**，蓝区"疑似完整源码树"的怀疑被证伪。证据：
+  - `find . \( -name "*.cpp" -o -name "*.cce" -o -name "*.cc" \)` 全树仅
+    命中 build-cpu/build-npu 的 CMakeCompilerId 自检 cpp，无任何业务源码；
+    `find . -name "*.h"` 零命中（含 build 目录）。
+  - 顶层 `CMakeLists.txt` `add_subdirectory` 引用的五个源码子目录
+    `common/ meta_manager/ access_operator/ runtime/ bindings/`
+    **全部不存在**于该 tarball；顶层只有 build-cpu/ build-npu/ 产物目录
+    + build.sh（引导脚本，还会从 gitcode 拉 UMDK）+ docs/（两份设计文档）
+    + tests/（python 测试与 perf 脚本）。
+  - build.sh 是 bootstrap 引导脚本（cpu/npu 构建入口），但无源可编，
+    不构成源码包。
+  => 结论维持蓝区 0c5010b 判定：**方式 A/C 球仍在用户侧**。绿区已按
+  runbook 阶段 3/4/5 就绪（service PID 182921 在 28999 监听，仓库已同步
+  0c5010b），收到源码包后即可现编重跑，判据不变（K2-G3 需 10 行
+  URMA_CEILING_RESULT 全 ok=1）。
 
 ---
 
