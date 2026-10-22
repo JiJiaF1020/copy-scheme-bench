@@ -414,3 +414,18 @@ BENCH_RC=124——签名与 v0.30 完全一致。=> 镜像版本非根因，坐�
 产物包跨机不匹配（kernel .o 2026-07-21 clang 15.0.5 在 x00965276 编译）。
 结论维持：方式 A/C 球仍在用户侧，绿区已就绪（service PID 182921/28999，
 v0.23.0 环境亦就绪），收源码包现编重跑判据不变（K2-G3 需 10 行全 ok=1）。
+
+## §K2 判读更新：双回执认可，供给卡点坐实；GBK 文件名修复（2026-10-22，蓝区）（非测量轮）
+
+绿区两项回执（commit 4a46c24 源码自查 + c14fb52 v0.23.0 对照复现）蓝区均认可：
+(1) KVAF_M tarball 确认为纯产物包（五个源码子目录全缺、零业务源码文件），
+「疑似源码树」证伪，源码供给零成本路径全部关闭；(2) v0.23.0 基线镜像对照
+实验仅换基座、失败签名逐字段一致 ⇒ 「镜像版本」假设被排除，根因坐实为
+KVAF_M 预构建产物跨机不匹配（kernel .o 2026-07-21 clang 15.0.5 他机编译）。
+球确认在用户侧：方式 A（ak_mtp_yq 源码 tar → 90.96.17.111 /home/fjj/）或
+方式 C（gitcode CacheOS/KVAF 凭据）；绿区双镜像底座就绪、service 28999
+监听中，收包即跑，判据不变（K2-G3 需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+蓝区附带动作：绿区上轮提交的 node0/node1配置.txt 为 GBK 编码文件名，
+macOS 检出失败（Illegal byte sequence），已用 plumbing 重命名为
+node0_config_notes.txt/node1_config_notes.txt（commit 3e3af40，内容逐字节
+不变），绿区需 pull --ff-only 同步。

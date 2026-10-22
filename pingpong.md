@@ -5,7 +5,7 @@
 - 本文件是蓝区 ↔ 绿区的唯一通信面；`history.md` 是只追加的轮次档案。
 - **蓝区**（可外部 AI 侧）写全部代码、做全部判读决策；**绿区**（隔离执行侧）按任务书执行并回写交付，不改代码。
 - 每次 commit 必须同时包含代码 + `pingpong.md` + `history.md`；pull 用 `--ff-only`；绝不 force-push。
-- Current owner: **绿区**。Status: §K2 交付卡点（BatchPut 全核失败，等蓝区按方式A/C补发 KVAF）（URMA/KVAF BatchGet 带宽极限，蓝区自研自包含 bench side_kvaf/urma_ceiling_bench.py，取代 §K1b）；§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
+- Current owner: **绿区（待命）**。Status: §K2 供给卡点——KVAF_M 纯产物包坐实（源码自查证伪 + v0.23.0 对照排除镜像因素），**球在用户侧**：方式 A 源码包（ak_mtp_yq tar → 90.96.17.111 /home/fjj/）或方式 C gitcode 凭据；绿区双镜像底座就绪、service 28999 监听中，收包即跑。§D1 已派单（同代码异机性能归因诊断）。R7 队列深度扫描与 R8 copy 数门控阈值扫描仍在队列待派（编号不变）。
 
 ## 0. 目标与口径
 
@@ -307,6 +307,32 @@ KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为*
   结论维持：**方式 A/C 球仍在用户侧**，绿区已就绪（service PID 182921 在
   28999 监听，v0.23.0 环境亦就绪），收到源码包后现编重跑判据不变（K2-G3
   需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+
+#### 蓝区判读更新（2026-10-22，蓝区）
+
+两项绿区回执均认可，质量高：
+
+- **源码自查证伪 ⇒ 零成本路径全部关闭**：KVAF_M tarball 确认为纯产物包
+  （CMakeLists 引用的五个源码子目录全缺、全树零业务 .cpp/.cce/.h）。
+  至此源码供给只剩两条：**方式 A**（向 KVAF_M 提供方要 ak_mtp_yq 源码
+  tar 包）或**方式 C**（gitcode CacheOS/KVAF 读权限）。蓝区两侧渠道
+  均无（本机无 checkout、gitcode 凭据无权限），球确认在用户侧。
+- **v0.23.0 对照实验 ⇒ 「镜像版本」假设被实验排除**：同一 bench、同一
+  service、同一产物包，仅换基座镜像（v0.30.0rc2 → v0.23.0，用户指定
+  tag），失败签名逐字段一致（result=-5 / 32核 result=8 cq_status=2 /
+  EID_PAIR_FAILED / RC=124）。控制变量干净，根因坐实为 **KVAF_M 预构建
+  产物跨机不匹配**，与测试环境无关。v0.23.0 镜像环境一并留档为已验证
+  底座（两个镜像底座均可用于收包后重跑）。
+- **蓝区侧动作留档**：绿区上轮提交的 `node0/node1配置.txt` 文件名为
+  GBK 编码，macOS 蓝区无法检出（Illegal byte sequence）；已用 plumbing
+  重命名为 `side_kvaf/node0_config_notes.txt` / `node1_config_notes.txt`
+  （commit `3e3af40`，内容逐字节不变）。**绿区下次开工前先
+  `git pull --ff-only` 同步**。后续请用 UTF-8 或 ASCII 文件名。
+- **当前状态**：绿区全就绪待命（service 28999 监听、两镜像底座就绪、
+  runbook 阶段 3/4/5 预检通过）；唯一阻塞 = KVAF 源码供给。用户侧动作：
+  向 KVAF_M 提供方（x00965276 / gitcode CacheOS owner）要 ak_mtp_yq
+  分支源码 tar（`--exclude='./build*' --exclude='./.git'`），放到
+  90.96.17.111 的 /home/fjj/ 即可解堵。
 
 ---
 
