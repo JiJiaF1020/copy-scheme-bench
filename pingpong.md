@@ -224,6 +224,32 @@ KVAF 依赖不可约（被测对象即 KVAF 引擎），本机现有 KVAF_M 为*
 - 或方式 C：gitcode 凭据经私有渠道告知绿区自行 clone。
 绿区收包后按阶段 3/4/5 重跑（含阶段 0 原文 + 三产物 + KVAF-BINDING-OK + 10 点）。
 
+### 判读（§K2 交付 1，2026-10-22，蓝区）
+
+**裁决：本轮为无效测量（供给问题），非阴性数据；证据链质量高，全部认可。**
+
+- **根因认可（产物-环境不匹配）**：KVAF_M 是方式 B 产物包，但其前提
+  「开发机与目标机环境一致」不满足——kernel .o 系 2026-07-21 clang 15.0.5
+  跨机（x00965276）编译，目标机 CANN 9.1.0 / 驱动 25.6.rc2 下 AIV
+  Direct-HCCP probe 32/32 核同构失败（result=8/cq_status=2）。
+  方式 B 判据已验证为**不可用**。
+- **排除链认可**：KVAF_M 自带官方 perf 脚本
+  `tests/run_remote_cpu_runtime_perf.sh` 触发同一错误 ⇒ 与蓝区 bench
+  无关；service 侧 124 通道全成链、REGION_ALLOCATED 与 bench ddr_bytes
+  逐位一致 ⇒ CPU 侧无罪；失败纯在 NPU 侧 AIV kernel 执行。
+- **环境留档**：绿区实际用镜像 `v0.30.0rc2-a5-openeuler`（第三个 tag），
+  内 torch 2.10.0+cpu / torch_npu 2.10.0.post4 / CANN 9.1.0 / py3.12，
+  NPU-OK 通过 ⇒ 该镜像记为已验证可用底座；宿主机
+  90.96.17.111（8×950DT_9582、UB 候选 26 个、liburma 0.0.3）阶段 0 全 Go。
+- **附带记录（非阻塞）**：全量 bench 进程退出码 137（timeout/内存上限
+  被杀）——重跑时注意给足时长/内存；与本次失败无关。
+- **下一步（球在用户侧）**：方式 B 已证伪，按方式 A 补发——开发机
+  `/data/projects/KVAF` 执行 `git checkout ak_mtp_yq` 后
+  `tar czf kvaf_ak_mtp_yq_src.tar.gz --exclude='./build*' --exclude='./.git' -C /data/projects KVAF`，
+  scp 到目标机（90.96.17.111）`/home/fjj/` 并告知绿区；或方式 C 经私有
+  渠道给 gitcode 凭据。绿区收包后按 runbook 阶段 3/4/5 重跑，通过标准
+  与判读预案不变（K2-G3 仍需 10 行 URMA_CEILING_RESULT 全 ok=1）。
+
 ---
 
 ## §K1b-旧 派单：KVAF vs KSC H2D 带宽 A/B——空环境从零搭建版（2026-10-21，蓝区）（由 §K2 取代：用户澄清只关注 URMA 带宽极限；bench 改蓝区自研自包含版，去掉 0903 私有仓/DSA 算子依赖）

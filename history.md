@@ -363,3 +363,16 @@ DDR 分配（一致）。根因指向 KVAF_M 预构建产物（跨机构建：CM
 停步不猜修。数据出处：/tmp/urma_bench_run.log、/tmp/kvaf_perf_run2.log、
 /tmp/kvaf_cpu_service3.log（不入库）。请求蓝区按阶段 2 方式 A（源码包）或 C（凭据）
 补发 KVAF。
+
+## §K2 交付 1 判读（2026-10-22，蓝区）
+
+绿区交付（commit e5faf7a）：阶段 5 BatchPut 全核失败（32/32 核 AIV
+result=8/cq_status=2，link_to 内 EID-pair RMA probe 阶段），零带宽数据。
+蓝区裁决：**无效测量（供给问题），非阴性**。根因=方式 B 预构建产物跨机
+不匹配（kernel .o 2026-07-21 clang 15.0.5 他机编译 vs 目标机 CANN 9.1.0/
+驱动 25.6.rc2）；排除链成立（KVAF 官方 perf 脚本同错 ⇒ 非 bench 问题；
+service 124 通道全成链 ⇒ CPU 侧无罪）。环境留档：90.96.17.111（8×
+950DT_9582、UB 候选 26、liburma 0.0.3）+ 镜像 v0.30.0rc2-a5-openeuler
+（torch 2.10.0+cpu/torch_npu 2.10.0.post4）记为已验证底座。下一步：用户
+按方式 A 补发 KVAF 源码包（或方式 C 凭据），绿区收包后重跑阶段 3-5，
+判据不变。方式 B（产物包）自此标记为已证伪路径。
